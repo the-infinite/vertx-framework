@@ -8,7 +8,7 @@
   <groupId>io.github.the-infinite</groupId>
   <artifactId>framework</artifactId>
   <version>1.0.0-Final</version>
-  <packaging>jar</packaging>
+  <packaging>pom</packaging>
 
   <name>The Infinite Shared Framework</name>
   <description>Reusable Java framework used in server-side projects</description>
