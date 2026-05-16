@@ -1,0 +1,440 @@
+package io.github.the_infinite.framework;
+
+
+import io.github.the_infinite.framework.doc.DocumentationRegistrant;
+import io.github.the_infinite.framework.doc.RouteDescription;
+import io.github.the_infinite.framework.env.AppEnvironment;
+import io.github.the_infinite.framework.logging.console.ConsoleLogger;
+import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
+import io.github.the_infinite.framework.response.ErrorResult;
+import io.github.the_infinite.framework.response.TypedServiceResult;
+
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.vertx.core.Handler;
+import io.vertx.core.Promise;
+import io.vertx.core.Vertx;
+import io.vertx.core.http.HttpMethod;
+import io.vertx.ext.web.RoutingContext;
+import io.vertx.ext.web.handler.BodyHandler;
+import io.vertx.ext.web.handler.StaticHandler;
+
+@SuppressWarnings({"unused", "CallToPrintStackTrace"})
+public abstract class RouteController {
+  private static final Logger logger = LoggerFactory.getLogger(RouteController.class);
+  static int totalCount = 0;
+  protected final String basePath;
+  protected final ConfigurationRegistrant registrant;
+  private final int version;
+
+  public RouteController(@NotNull Vertx vertx, @NotNull String basePath, int version) {
+    this.basePath = noTrailingSlash(basePath);
+    this.version = version;
+    this.registrant = ConfigurationRegistrant.getInstance(vertx);
+
+    //? if this registrant has not mounted error handlers yet...
+    if (registrant.mountedHandlers.compareAndSet(false, true)) {
+      //? Then mount the error handlers.
+      registrant.router.errorHandler(404, context -> {
+        final var errorResult = new ErrorResult("The requested resource was not" + " found", context.request().path(), 404);
+        final var correlationContext = CorrelationContext.from(context);
+        endAs(errorResult.toServiceResult(), correlationContext);
+      });
+
+      //? Then mount handler 400.
+      registrant.router.errorHandler(400, context -> {
+        final var errorResult = ErrorResult.of(context.failure());
+        final var correlationContext = CorrelationContext.from(context);
+        endAs(errorResult.toServiceResult(), correlationContext);
+      });
+
+      //? Okay then.
+      registrant.router.errorHandler(500, context -> {
+        final var errorResult = ErrorResult.of(context.failure());
+        final var correlationContext = CorrelationContext.from(context);
+        endAs(errorResult.toServiceResult(), correlationContext);
+      });
+    }
+  }
+
+  public RouteController(@NotNull Vertx vertx, String basePath) {
+    this(vertx, basePath, 0);
+  }
+
+  static Handler<RoutingContext> wrapMiddleware(Handler<CorrelationContext> middleware) {
+    final var env = AppEnvironment.getInstance();
+    return routingContext -> {
+      try {
+        final var correlationContext = CorrelationContext.from(routingContext);
+        middleware.handle(correlationContext);
+      } catch (Exception e) {
+        final var errorResult = ErrorResult.of(e);
+        ConsoleLogger.getInstance().error(errorResult.getMessage());
+        if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
+          errorResult.printStackTrace();
+        }
+        endAs(errorResult.toServiceResult(), CorrelationContext.from(routingContext));
+      }
+    };
+  }
+
+  static private String extractResultBody(TypedServiceResult<?> result) {
+    try {
+      return result.serialize();
+    } catch (Exception e) {
+      final var errorResult = ErrorResult.of(e);
+      ConsoleLogger.getInstance().error(errorResult.getMessage());
+      if (AppEnvironment.getInstance().getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
+        if (e.getCause() != null) {
+          e.getCause().printStackTrace();
+        } else {
+          e.printStackTrace();
+        }
+      }
+      return "Failed to serialize response body: " + errorResult.getMessage();
+    }
+  }
+
+  static private void endAs(TypedServiceResult<?> result, CorrelationContext context) {
+    final var routingContext = context.router();
+    final var resultBody = extractResultBody(result);
+    final var response = routingContext.response();
+
+    //? If this has been sent or is no longer needed...
+    if (response.headWritten() || response.ended()) {
+      return;
+    }
+
+    //? Set the status code.
+    response.setStatusCode(result.getCode());
+
+    //? Add the request ID.
+    response.putHeader("X-Request-ID", context.correlationId());
+
+    //? If this is a JSON object.
+    if (resultBody == null) {
+      final var error = new IllegalStateException("Response body is null");
+      response.putHeader("Content-Type", "text/plain").setStatusCode(503).end(ErrorResult.of(error).toServiceResult().getMessage());
+      throw error;
+    }
+
+    //? If this is a JSON response
+    if (result.getResponseType() == TypedServiceResult.ResponseType.JSON) {
+      response.putHeader("Content-Type", "application/json");
+      response.end(resultBody);
+      return;
+    }
+
+    if (result.getResponseType() == TypedServiceResult.ResponseType.FILE) {
+      response.putHeader("Content-Disposition", "attachment; filename=\"%s\"".formatted(resultBody.substring(resultBody.lastIndexOf("/") + 1)));
+      response.sendFile(resultBody);
+      return;
+    }
+
+    if (result.getResponseType() == TypedServiceResult.ResponseType.XML) {
+      response.putHeader("Content-Type", "application/xml");
+      response.end(resultBody);
+      return;
+    }
+
+    if (result.getResponseType() == TypedServiceResult.ResponseType.JAVASCRIPT) {
+      response.putHeader("Content-Type", "application/javascript");
+      response.end(resultBody);
+      return;
+    }
+
+    if (result.getResponseType() == TypedServiceResult.ResponseType.HTML) {
+      response.putHeader("Content-Type", "text/html");
+      response.end(resultBody);
+      return;
+    }
+
+    //? Default to plain text.
+    response.putHeader("Content-Type", "text/plain");
+    response.end(resultBody);
+  }
+
+  static private <T> Handler<RoutingContext> wrapHandler(RouteHandler<T> handler) {
+    return routingContext -> {
+      final var env = AppEnvironment.getInstance();
+      try {
+        final var correlationContext = CorrelationContext.from(routingContext);
+        final var promise = Promise.<TypedServiceResult<T>>promise();
+        final var future = promise.future();
+
+        //? Attach the listener of sorts...
+        future.andThen(typedResult -> {
+          //? If this failed...
+          if (!typedResult.succeeded()) {
+            endAs(ErrorResult.of(typedResult.cause()).toServiceResult(), correlationContext);
+            return;
+          }
+
+          //? Get the result down.
+          endAs(typedResult.result(), correlationContext);
+        });
+
+        //? Then call the handler so the attached listener can propagate as required.
+        handler.handle(correlationContext, promise);
+      } catch (ErrorResult e) {
+        final var errorResult = ErrorResult.of(e);
+        ConsoleLogger.getInstance().error(errorResult.getMessage());
+        if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
+          errorResult.printStackTrace();
+        }
+        throw new RuntimeException(e);
+      }
+    };
+  }
+
+  private String noTrailingSlash(String path) {
+    path = path.trim().replaceAll("//+", "/");
+
+    if (path.isEmpty() || path.equals("/")) {
+      return "/";
+    }
+
+    if (path.endsWith("/")) {
+      return path.substring(0, path.lastIndexOf('/'));
+    }
+
+    return path;
+  }
+
+
+  private String calculateFullPath(String path) {
+    if (version == 0) {
+      return noTrailingSlash("/%s/%s".formatted(this.basePath, path));
+    }
+    return noTrailingSlash("/v%d/%s/%s".formatted(this.version, this.basePath, path));
+  }
+
+
+  @SafeVarargs
+  private <T> void mount(@NotNull String path,
+                         boolean hasBody, @NotNull HttpMethod method,
+                         @NotNull RouteDescription description,
+                         RouteHandler<T> handler, Handler<CorrelationContext>... middlewares) {
+    final String fullPath = calculateFullPath(path);
+
+    DocumentationRegistrant.getInstance().registerRoute(fullPath, method.name(), this.getClass().getSimpleName(), description);
+
+    //? If this has a body...
+    if (hasBody) {
+      registrant.router.route().method(method).path(fullPath).handler(BodyHandler.create());
+    }
+
+    // Registration logic goes here
+    if (middlewares != null) {
+      for (final var middleware : middlewares) {
+        if (middleware == null) continue;
+        registrant.router.route().path(fullPath).handler(wrapMiddleware(middleware));
+      }
+    }
+
+    //? This is fine.
+    registrant.router.route().method(method).path(fullPath).last().handler(wrapHandler(handler));
+
+    //? Now, mount it.
+    registrant.vertx.executeBlocking(() -> {
+      logger.atInfo()
+        .addKeyValue("handler", getClass().getSimpleName())
+        .addKeyValue("method", method.name())
+        .addKeyValue("path", fullPath)
+        .log("Mounted a '\u001B[32m{}\u001B[0m' handler which listens on  '\u001B[36m{}\u001B[0m'", method.name(), fullPath);
+      return null;
+    }).await();
+
+    //? Increment counter.
+    totalCount++;
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountGet(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.GET, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountPost(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, true, HttpMethod.POST, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountPut(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, true, HttpMethod.PUT, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountPatch(String path,
+                                      boolean hasBody, @NotNull RouteDescription description, RouteHandler<T> handler,
+                                      @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, hasBody, HttpMethod.PATCH, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountDelete(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.DELETE, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountOptions(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.OPTIONS, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountHead(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.HEAD, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountTrace(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.TRACE, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountConnect(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.CONNECT, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountCopy(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.COPY, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountMove(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.MOVE, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountLock(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, true, HttpMethod.LOCK, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountUnlock(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.UNLOCK, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountPropfind(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, true, HttpMethod.PROPFIND, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountMkcol(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.MKCOL, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountSearch(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, true, HttpMethod.SEARCH, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountReport(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, true, HttpMethod.REPORT, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountCheckIn(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.CHECKIN, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountCheckOut(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.CHECKOUT, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountUncheckOut(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, HttpMethod.UNCHECKOUT, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountMerge(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, true, HttpMethod.MERGE, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountAcl(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, true, HttpMethod.ACL, description, handler, middlewares);
+  }
+
+
+  @SafeVarargs
+  protected final <T> void mountCustom(String path, HttpMethod method, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+    mount(path, false, method, description, handler, middlewares);
+  }
+
+  @SafeVarargs
+  protected final void mountStatic(String path, String fileSystemPath, @Nullable final Handler<CorrelationContext>... middlewares) {
+    final String fullPath;
+
+    //? This is for unversioned APIs
+    if (version == 0) {
+      fullPath = noTrailingSlash("/%s/%s/*".formatted(this.basePath, path));
+    }
+
+    //? This is for versioned APIs
+    else {
+      fullPath = noTrailingSlash("/v%d/%s/%s/*".formatted(this.version, this.basePath, path));
+    }
+
+    if (middlewares != null) {
+      for (final var middleware : middlewares) {
+        if (middleware == null) continue;
+        registrant.router.route().path(fullPath).handler(wrapMiddleware(middleware));
+      }
+    }
+
+    //? This is fine
+    registrant.router.route(fullPath).blockingHandler(StaticHandler.create(fileSystemPath));
+
+    //? Log this kind of.
+    if (ConfigurationRegistrant.deployedServers.size() == AppEnvironment.getInstance().getServerCount() - 1) {
+
+      registrant.vertx.executeBlocking(() -> {
+        logger.atInfo()
+          .addKeyValue("handler", getClass().getSimpleName())
+          .addKeyValue("path", fullPath)
+          .log("Mounted a '\u001B[32mstatic file\u001B[0m' handler which listens on '{}'", fullPath);
+        return null;
+      }).await();
+    }
+
+    //? Increment counter.
+    totalCount++;
+  }
+
+  public abstract void registerRoutes();
+
+  public interface RouteHandler<T> {
+    void handle(CorrelationContext context, Promise<TypedServiceResult<T>> promise) throws ErrorResult;
+  }
+}

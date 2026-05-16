@@ -1,4 +1,4 @@
-= Core
+= Framework
 
 image:https://img.shields.io/badge/vert.x-5.0.6-purple.svg[link="https://vertx.io"]
 
@@ -35,7 +35,7 @@ This module is published as a regular Java library (JAR). Add the following depe
 ----
 <dependency>
   <groupId>io.github.the-infinite</groupId>
-  <artifactId>core</artifactId>
+  <artifactId>framework</artifactId>
   <version>1.0.0-Final</version>
 </dependency>
 ----
@@ -45,7 +45,7 @@ This module contains a convenience `MainVerticle` you can deploy from your appli
 [source,java]
 ----
 import io.vertx.core.Vertx;
-import io.github.the_infinite.core.deploy.ServerVerticle;
+import io.github.the_infinite.framework.deploy.ServerVerticle;
 
 public class App {
   static void main(String[] args) {

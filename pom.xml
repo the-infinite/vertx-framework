@@ -6,12 +6,12 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>io.github.the-infinite</groupId>
-  <artifactId>core</artifactId>
+  <artifactId>framework</artifactId>
   <version>1.0.0-Final</version>
   <packaging>jar</packaging>
 
-  <name>TM30 Java Core Engine</name>
-  <description>Reusable Engine Used in most TM30 Java Server-Side Projects</description>
+  <name>The Infinite Shared Framework</name>
+  <description>Reusable Java framework used in server-side projects</description>
   <url>https://gitlab.com/tm30/acs/shared-framework</url>
 
   <scm>
