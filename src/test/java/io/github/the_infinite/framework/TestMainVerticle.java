@@ -8,7 +8,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import io.github.the_infinite.framework.controller.TestController;
 import io.github.the_infinite.framework.deploy.ServerVerticle;
 import io.github.the_infinite.framework.env.AppEnvironment;
-import io.github.the_infinite.framework.AppConfig;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClientResponse;
