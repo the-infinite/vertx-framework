@@ -20,8 +20,8 @@
   <dependencySets>
     <dependencySet>
       <useProjectArtifact>false</useProjectArtifact>
-      <unpack>true</unpack>
-      <outputDirectory>/</outputDirectory>
+      <unpack>false</unpack>
+      <outputDirectory>lib</outputDirectory>
       <scope>runtime</scope>
     </dependencySet>
   </dependencySets>
