@@ -1,34 +1,44 @@
 package io.github.the_infinite.framework.job;
 
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
 import io.github.the_infinite.framework.logging.TimeEvent;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
 import io.github.the_infinite.framework.logging.monitor.LogEvent;
 import io.github.the_infinite.framework.response.ErrorResult;
 import io.github.the_infinite.framework.utils.DateUtils;
-
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 
+/**
+ * Registry responsible for tracking and scheduling {@link ServiceJob} instances for a single {@link Vertx} runtime.
+ */
 @SuppressWarnings("unused")
 public final class JobRegistry {
-  private final static Map<String, ServiceJob<?>> jobs = new ConcurrentHashMap<>();
-  private final static Map<String, TimeEvent> times = new ConcurrentHashMap<>();
-  private static final int batchedResults = 20;
+  private final static Map<Vertx, JobRegistry> instances = new ConcurrentHashMap<>();
+  private final Map<String, ServiceJob<?>> jobs = new ConcurrentHashMap<>();
+  private final Map<String, TimeEvent> times = new ConcurrentHashMap<>();
   private final ArrayList<Long> timers;
   private final CorrelationContext context;
-
   private final Vertx vertx;
+  private volatile boolean shutdownHookRegistered;
 
-  public JobRegistry(Vertx vertx) {
+  private JobRegistry(Vertx vertx) {
     this.vertx = vertx;
     this.timers = new ArrayList<>();
     this.context = CorrelationContext.from(vertx.getOrCreateContext());
+    this.shutdownHookRegistered = false;
+  }
+
+  /**
+   * Returns the singleton registry associated with the provided Vert.x instance.
+   */
+  public static JobRegistry getInstance(Vertx vertx) {
+    return instances.computeIfAbsent(vertx, JobRegistry::new);
   }
 
   private String getRunId(ServiceJob<?> job) {
@@ -54,15 +64,32 @@ public final class JobRegistry {
     time.end();
   }
 
-  private <T> void runJob(ServiceJob<T> job) {
+  private void markEndIfStarted(ServiceJob<?> job) {
     final var id = getRunId(job);
+    final var time = times.remove(id);
+    if (time != null) {
+      time.end();
+    }
+  }
+
+  private void handleFailure(ServiceJob<?> job, Throwable cause) {
+    final var error = ErrorResult.of(cause);
+    final var parsed = error.toServiceResult();
+    markEndIfStarted(job);
+    job.markFailure();
+    job.logger.error(context, LogEvent.create(error.getMessage(), getRunId(job), Map.of("data", parsed.getData(), "code", parsed.getCode())));
+  }
+
+  private <T> Future<Void> runJob(ServiceJob<T> job) {
+    final var id = getRunId(job);
+    final var promise = Promise.<Void>promise();
+
     try {
       markStart(job);
       job.run().andThen((runResult) -> {
         if (!runResult.succeeded()) {
-          final var error = ErrorResult.of(runResult.cause());
-          final var parsed = error.toServiceResult();
-          job.logger.error(context, LogEvent.create(error.getMessage(), getRunId(job), Map.of("data", parsed.getData(), "code", parsed.getCode())));
+          handleFailure(job, runResult.cause());
+          promise.fail(runResult.cause());
           return;
         }
 
@@ -71,25 +98,29 @@ public final class JobRegistry {
 
         job.logger.exec(context, LogEvent.create(result.getMessage(), id, Map.of("data", result.getData()))).andThen(loggingResult -> {
           if (!loggingResult.succeeded()) {
-            final var error = ErrorResult.of(loggingResult.cause());
-            final var parsed = error.toServiceResult();
-            job.logger.error(context, LogEvent.create(error.getMessage(), getRunId(job), Map.of("data", parsed.getData(), "code", parsed.getCode())));
+            handleFailure(job, loggingResult.cause());
+            promise.fail(loggingResult.cause());
             return;
           }
 
           //? Save this.
           this.markEnd(job);
+          times.remove(id);
           job.markSuccess();
+          promise.succeed();
         });
       });
     } catch (Throwable e) {
-      final var error = ErrorResult.of(e);
-      final var parsed = error.toServiceResult();
-      job.logger.error(context, LogEvent.create(error.getMessage(), getRunId(job), Map.of("data", parsed.getData(), "code", parsed.getCode())));
+      handleFailure(job, e);
+      promise.fail(e);
     }
 
+    return promise.future();
   }
 
+  /**
+   * Returns the number of jobs currently registered against this registry.
+   */
   public int jobCount() {
     return jobs.size();
   }
@@ -106,28 +137,38 @@ public final class JobRegistry {
     return stats;
   }
 
+  /**
+   * Stops all registered jobs and cancels active timers for this registry.
+   */
   public Future<Void> stopJobs() {
     final var promise = Promise.<Void>promise();
+    final var stopFutures = new ArrayList<Future<?>>();
 
     for (final var timer : timers) {
       vertx.cancelTimer(timer);
     }
 
-    vertx.executeBlocking(() -> {
-      for (final var job : jobs.values()) {
-        job.stopGracefully().andThen(result -> {
-          if (result.succeeded()) {
-            this.markEnd(job);
-          }
-        });
-      }
+    for (final var job : jobs.values()) {
+      stopFutures.add(job.stopGracefully().andThen(result -> {
+        if (result.succeeded()) {
+          this.markEndIfStarted(job);
+        }
+      }));
+    }
 
-      return null;
-    });
+    if (stopFutures.isEmpty()) {
+      promise.succeed();
+      return promise.future();
+    }
+
+    Future.all(stopFutures).onSuccess(v -> promise.succeed()).onFailure(promise::fail);
 
     return promise.future();
   }
 
+  /**
+   * Starts all registered jobs according to their configured execution model.
+   */
   public Future<Void> runJobs() {
     final var promise = context.<Void>promise();
     final var promises = new ArrayList<Future<?>>();
@@ -150,24 +191,31 @@ public final class JobRegistry {
 
       //? Skip the first out of step run for deferred jobs.
       if (job.deferred) continue;
-      promises.add(job.run());
+      promises.add(runJob(job));
     }
 
     //? Register our on-exit hook to terminate all jobs.
-    Runtime.getRuntime().addShutdownHook(new Thread(() -> stopJobs().andThen(stopResult -> {
-      if (stopResult.failed()) {
-        final var error = ErrorResult.of(stopResult.cause());
-        console.error("Failed to stop jobs gracefully: %s".formatted(error.getMessage()));
-        return;
-      }
+    if (!shutdownHookRegistered) {
+      synchronized (this) {
+        if (!shutdownHookRegistered) {
+          Runtime.getRuntime().addShutdownHook(new Thread(() -> stopJobs().andThen(stopResult -> {
+            if (stopResult.failed()) {
+              final var error = ErrorResult.of(stopResult.cause());
+              console.error("Failed to stop jobs gracefully: %s".formatted(error.getMessage()));
+              return;
+            }
 
-      try {
-        System.exit(0);
-      } catch (Throwable e) {
-        final var error = ErrorResult.of(e);
-        console.error("Failed to exit gracefully: %s".formatted(error.getMessage()));
+            try {
+              System.exit(0);
+            } catch (Throwable e) {
+              final var error = ErrorResult.of(e);
+              console.error("Failed to exit gracefully: %s".formatted(error.getMessage()));
+            }
+          })));
+          shutdownHookRegistered = true;
+        }
       }
-    })));
+    }
 
     //? Run them the first time if they are all defined here for us.
     if (!promises.isEmpty()) {
@@ -193,7 +241,7 @@ public final class JobRegistry {
 
           final var now = new Date();
           final var schedule = job.schedule;
-          final var lastRun = job.lastRun;
+          final var lastRun = job.getLastRun();
 
           //? Update the reference time.
           calendar.setTime(now);

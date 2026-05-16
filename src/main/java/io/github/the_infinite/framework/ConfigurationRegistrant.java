@@ -25,6 +25,7 @@ import io.vertx.core.impl.future.PromiseImpl;
 import io.vertx.core.net.NetServer;
 import io.vertx.core.net.NetServerOptions;
 import io.vertx.ext.web.Router;
+import lombok.Getter;
 
 @SuppressWarnings("unused")
 public class ConfigurationRegistrant {
@@ -39,6 +40,7 @@ public class ConfigurationRegistrant {
   private static final ReadWriteLock socketLocker = new ReentrantReadWriteLock();
   private static Vertx globalVertx = null;
   final CorrelationContext context;
+  @Getter
   final Router router;
   final Vertx vertx;
   final AtomicBoolean mountedHandlers;
@@ -109,10 +111,6 @@ public class ConfigurationRegistrant {
 
   public static ConfigurationRegistrant getInstance() {
     return getInstance(vertx());
-  }
-
-  public Router getRouter() {
-    return router;
   }
 
   public Vertx manager() {
@@ -340,7 +338,7 @@ public class ConfigurationRegistrant {
 
   public Future<JobRegistry> worker() {
     final var promise = Promise.<JobRegistry>promise();
-    final var jobRegistry = new JobRegistry(vertx);
+    final var jobRegistry = JobRegistry.getInstance(vertx);
     final var time = console.time("Finished starting the job runner");
 
     //? Run all jobs

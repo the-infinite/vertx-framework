@@ -3,6 +3,13 @@ package io.github.the_infinite.framework.logging.monitor;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.time.OffsetDateTime;
+import java.util.Collection;
+import java.util.Objects;
+
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.TimeEvent;
 import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
@@ -12,55 +19,81 @@ import io.github.the_infinite.framework.monitoring.MonitoringEvent;
 import io.github.the_infinite.framework.response.ErrorResult;
 import io.github.the_infinite.framework.types.BatchContainer;
 import io.github.the_infinite.framework.utils.DataHelpers;
-
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
-import java.time.OffsetDateTime;
-
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 
+/**
+ * Correlated logger implementation that publishes framework log events through an {@link ILogMonitor}.
+ * <p>
+ * The logger can publish events immediately or buffer them into batches, depending on the configured
+ * {@link Options}. Batched loggers also support periodic flushing, so partially filled batches do not remain
+ * in memory indefinitely.
+ */
 @SuppressWarnings("unused")
 public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
-  private static final MonitorLogger.Options defaultOptions = new Options();
+  private static final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
   private final Vertx vertx;
   private final ILogMonitor monitor;
   private final BatchContainer<MonitoringEvent> currentBatch;
-  private MonitorLogger.Options options;
+  private final MonitorLogger.Options options;
+  private final long batchFlushTimerId;
 
-  private OffsetDateTime lastSent;
-
-  private MonitorLogger(Vertx vertx, ILogMonitor monitor) {
-    this.vertx = vertx;
-    this.monitor = monitor;
-    this.options = defaultOptions;
-    this.lastSent = OffsetDateTime.now();
-    this.currentBatch = new BatchContainer<>(options.batchSize);
+  private MonitorLogger(Vertx vertx, ILogMonitor monitor, MonitorLogger.Options options) {
+    this.vertx = Objects.requireNonNull(vertx, "vertx cannot be null");
+    this.monitor = Objects.requireNonNull(monitor, "monitor cannot be null");
+    this.options = options.copy().normalize();
+    this.currentBatch = new BatchContainer<>(this.options.batchSize);
+    this.batchFlushTimerId = this.options.shouldBatch
+      ? this.vertx.setPeriodic(this.options.batchInterval * 1000, timerId -> flush().onFailure(this::handleFailure))
+      : -1;
   }
 
+  /**
+   * Serializes the given value for transport or storage in monitoring payloads.
+   * Strings are returned as-is; all other types are serialized as JSON when possible.
+   */
   public static String serialize(@NotNull Object object) {
     if (object instanceof String str) {
       return str;
     }
 
     try {
-      return (new ObjectMapper()).writeValueAsString(object);
+      return mapper.writeValueAsString(object);
     } catch (JsonProcessingException e) {
       return object.toString();
     }
   }
 
+  /**
+   * Creates a logger with default options.
+   */
+  public static MonitorLogger create(Vertx scope, ILogMonitor monitor) {
+    return create(scope, monitor, null);
+  }
+
+  /**
+   * Creates a logger bound to the supplied Vert.x scope and monitor implementation.
+   * The provided options are copied defensively so later external mutations do not affect this logger.
+   */
   public static MonitorLogger create(Vertx scope, ILogMonitor monitor, @Nullable Options options) {
-    final var logger = new MonitorLogger(scope, monitor);
+    return new MonitorLogger(scope, monitor, options == null ? new Options() : options);
+  }
 
+  /**
+   * Returns an immutable snapshot of the configuration used by this logger instance.
+   */
+  public @NotNull Options getOptions() {
+    return options.copy();
+  }
 
-    if (options != null) {
-      logger.options = options;
+  private void handleFailure(Throwable cause) {
+    if (options.onFailed == null) {
+      return;
     }
 
-    return logger;
+    options.onFailed.onFailed(ErrorResult.of(cause)).onFailure(ignored -> {
+    });
   }
 
   private Future<Void> sendEvent(MonitoringEvent event, int attemptsLeft) {
@@ -77,6 +110,7 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
 
         //? It should just fail.
         else {
+          handleFailure(publishResult.cause());
           promise.fail(publishResult.cause());
         }
 
@@ -91,26 +125,22 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
     return promise.future();
   }
 
-  private Future<Void> sendCurrentBatch(int attemptsLeft) {
-    if (currentBatch.poll().isEmpty()) {
-      return Future.failedFuture(new Exception("There are no events to push"));
-    }
-
+  private Future<Void> publishBatch(Collection<MonitoringEvent> events, int attemptsLeft) {
     final var promise = Promise.<Void>promise();
-    final var eventsList = currentBatch.poll().get();
 
     //? Try publishing these events.
-    monitor.publishEvents(eventsList).andThen(publishResult -> {
+    monitor.publishEvents(events).andThen(publishResult -> {
       //? If this failed.
       if (publishResult.failed()) {
         //? If this should retry...
         if (options.shouldRetry && attemptsLeft > 0) {
-          vertx.setTimer(options.retryInterval, timerId -> sendCurrentBatch(attemptsLeft - 1)
+          vertx.setTimer(options.retryInterval, timerId -> publishBatch(events, attemptsLeft - 1)
             .onSuccess(promise::succeed).onFailure(promise::fail));
         }
 
         //? It should just fail.
         else {
+          handleFailure(publishResult.cause());
           promise.fail(publishResult.cause());
         }
 
@@ -124,6 +154,20 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
 
     //? Return this future.
     return promise.future();
+  }
+
+  private Future<Void> sendPendingBatches(boolean includeActiveBatch, int attemptsLeft) {
+    if (includeActiveBatch) {
+      currentBatch.flush();
+    }
+
+    final var nextBatch = currentBatch.poll();
+    if (nextBatch.isEmpty()) {
+      return Future.succeededFuture();
+    }
+
+    return publishBatch(nextBatch.get(), attemptsLeft)
+      .compose(v -> sendPendingBatches(false, attemptsLeft));
   }
 
   private Future<Long> acquireLock(CorrelationContext context, int attemptsLeft) {
@@ -161,22 +205,17 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
     final var promise = context.<Void>promise();
     final var timestamp = OffsetDateTime.now();
 
-    //? Okay then.
-    this.vertx.executeBlocking(() -> acquireLock(context, attemptsLeft).andThen(idResult -> {
-      //? This is the ID of the event.
-      var eventId = 0L;
-
-      //? If we could not acquire the lock...
-      if (!idResult.succeeded()) {
+    acquireLock(context, attemptsLeft).andThen(idResult -> {
+      if (idResult.failed()) {
         promise.fail(idResult.cause());
         return;
       }
 
-      eventId = idResult.result();
+      final var eventId = idResult.result();
       final var message = messageData.message();
       final var data = messageData.data();
 
-      //? Then push this event to our batching queue, or send it directly.
+      //? Then push this event to our batching queue or send it directly.
       final var event = new MonitoringEvent(eventId, timestamp.toInstant().toEpochMilli(), duration, context, messageData.group(), messageData.topic(), level, message, data);
 
       //? Since we have built the event...
@@ -191,12 +230,14 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
       //? Since batching is enabled...
       currentBatch.add(event);
 
-      //? If this is due for publishing...
-      if (currentBatch.size() >= options.batchSize || timestamp.isAfter(lastSent.plusSeconds(options.batchInterval))) {
-        lastSent = timestamp;
-        this.sendCurrentBatch(attemptsLeft).onSuccess(promise::succeed).onFailure(promise::fail);
+      //? If a full batch is now ready, send it immediately.
+      if (currentBatch.hasReadyBatches()) {
+        this.sendPendingBatches(false, attemptsLeft).onSuccess(promise::succeed).onFailure(promise::fail);
+        return;
       }
-    }));
+
+      promise.succeed();
+    });
 
     //? Return this future.
     return promise.future();
@@ -257,6 +298,33 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
     ));
   }
 
+  /**
+   * Flushes all currently buffered log events.
+   * <p>
+   * For non-batched loggers this delegates to the monitor's own flush operation.
+   */
+  public Future<Void> flush() {
+    if (!options.shouldBatch) {
+      return monitor.flushEvents().mapEmpty();
+    }
+
+    return sendPendingBatches(true, options.maxRetries);
+  }
+
+  /**
+   * Cancels any periodic batch timer and flushes remaining buffered events.
+   */
+  public Future<Void> close() {
+    if (batchFlushTimerId >= 0) {
+      vertx.cancelTimer(batchFlushTimerId);
+    }
+
+    return flush();
+  }
+
+  /**
+   * Configuration for {@link MonitorLogger} delivery, batching, and failure handling.
+   */
   public static class Options {
     public int batchSize;
     public int maxRetries;
@@ -280,8 +348,44 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
       this.onFailed = null;
     }
 
+    private Options(Options other) {
+      this.batchSize = other.batchSize;
+      this.maxRetries = other.maxRetries;
+      this.shouldBatch = other.shouldBatch;
+      this.batchInterval = other.batchInterval;
+      this.retryInterval = other.retryInterval;
+      this.shouldRetry = other.shouldRetry;
+      this.useRetryQueue = other.useRetryQueue;
+      this.useDeadLetterQueue = other.useDeadLetterQueue;
+      this.onFailed = other.onFailed;
+    }
+
+    public Options copy() {
+      return new Options(this);
+    }
+
+    private Options normalize() {
+      if (batchSize <= 0) {
+        throw new IllegalArgumentException("batchSize must be greater than 0");
+      }
+
+      if (batchInterval <= 0) {
+        throw new IllegalArgumentException("batchInterval must be greater than 0");
+      }
+
+      if (retryInterval <= 0) {
+        throw new IllegalArgumentException("retryInterval must be greater than 0");
+      }
+
+      if (maxRetries < 0) {
+        throw new IllegalArgumentException("maxRetries cannot be negative");
+      }
+
+      return this;
+    }
+
     /**
-     * A function used to set exactly how many items should be batched inside of this
+     * A function used to set exactly how many items should be batched inside this
      * monitor logger before it sends events downstream to its monitor.
      */
     public Options setBatchSize(int batchSize) {
@@ -300,8 +404,25 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
     }
 
     /**
+     * Whether failed to publish operations should be retried automatically.
+     */
+    public Options setShouldRetry(boolean shouldRetry) {
+      this.shouldRetry = shouldRetry;
+      return this;
+    }
+
+    /**
+     * Sets the maximum number of retry attempts to perform before giving up.
+     */
+    public Options setMaxRetries(int maxRetries) {
+      assert (maxRetries >= 0);
+      this.maxRetries = maxRetries;
+      return this;
+    }
+
+    /**
      * The maximum time we expect between batches that any messages should be sent. So
-     * that at least every interval seconds, we can push the current batch to the monitor
+     * that at least every interval period, we can push the current batch to the monitor
      * even if we have not yet met up with the batch size.
      */
     public Options setBatchInterval(long interval) {
@@ -339,7 +460,7 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
     /**
      * What to do when this logger fails to publish to the monitor.
      */
-    public Options setOnFailed(@NotNull OnFailed handler) {
+    public Options setOnFailed(@Nullable OnFailed handler) {
       this.onFailed = handler;
       return this;
     }
