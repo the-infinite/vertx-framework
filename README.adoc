@@ -1,0 +1,71 @@
+= Core
+
+image:https://img.shields.io/badge/vert.x-5.0.6-purple.svg[link="https://vertx.io"]
+
+This application was generated using http://start.vertx.io
+
+== Building
+
+To launch your tests:
+
+[source,shellscript]
+----
+./mvnw clean test
+----
+
+To package your application:
+
+[source,shellscript]
+----
+./mvnw clean package
+----
+
+To run your application:
+
+[source,shellscript]
+----
+./mvnw clean compile exec:java
+----
+
+== Using as a library
+
+This module is published as a regular Java library (JAR). Add the following dependency to your application's `pom.xml` to consume it:
+
+[source,xml]
+----
+<dependency>
+  <groupId>io.github.the-infinite</groupId>
+  <artifactId>core</artifactId>
+  <version>1.0.0-Final</version>
+</dependency>
+----
+
+This module contains a convenience `MainVerticle` you can deploy from your application. Example minimal `main` that starts Vert.x and deploys the verticle:
+
+[source,java]
+----
+import io.vertx.core.Vertx;
+import io.github.the_infinite.core.deploy.ServerVerticle;
+
+public class App {
+  static void main(String[] args) {
+    Vertx vertx = Vertx.vertx();
+    vertx.deployVerticle(new ServerVerticle(), ar -> {
+      if (ar.succeeded()) {
+        System.out.println("ServerVerticle deployed");
+      } else {
+        ar.cause().printStackTrace();
+      }
+    });
+  }
+}
+----
+
+If you want to run an executable application using the Vert.x launcher, add `io.vertx:vertx-launcher-application` to your application's dependencies (this module declares it as `provided` so it does not force the launcher on consumers).
+
+== Help
+
+* https://vertx.io/docs/[Vert.x Documentation]
+* https://stackoverflow.com/questions/tagged/vert.x?sort=newest&pageSize=15[Vert.x Stack Overflow]
+* https://groups.google.com/forum/?fromgroups#!forum/vertx[Vert.x User Group]
+* https://discord.gg/6ry7aqPWXy[Vert.x Discord]
