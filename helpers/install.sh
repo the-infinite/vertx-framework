@@ -13,5 +13,3 @@ cd "${project_dir}"
 "${maven_cmd}" clean package
 "${maven_cmd}" install:install-file -Dfile="${project_dir}/target/shared-framework.jar" -DgroupId=io.github.the_infinite \
   -DartifactId=framework -Dversion="${version}" -Dpackaging=jar
-
-echo "Installed shared-framework version ${version} to local Maven repository."
