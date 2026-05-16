@@ -12,22 +12,21 @@
 
   <name>The Infinite Shared Framework</name>
   <description>Reusable Java framework used in server-side projects</description>
-  <url>https://gitlab.com/tm30/acs/shared-framework</url>
+  <url>https://github.com/the-infinite/vertx-framework</url>
 
   <scm>
-    <url>https://gitlab.com/tm30/acs/shared-framework</url>
-    <connection>scm:git:git://gitlab.com/tm30/acs/shared-framework</connection>
-    <developerConnection>scm:git:git@gitlab.com/tm30/acs/shared-framework
-    </developerConnection>
+    <url>https://github.com/the-infinite/vertx-framework</url>
+    <connection>scm:git:git://github.com/the-infinite/vertx-framework</connection>
+    <developerConnection>scm:git:git@github.com/the-infinite/vertx-framework</developerConnection>
     <tag>HEAD</tag>
   </scm>
 
   <developers>
     <developer>
-      <email>tobiloba.johnson@tm30.net</email>
+      <email>oluwatobi.johnson@getmoovable..com</email>
       <name>Oluwatobiloba Johnson</name>
-      <url>https://tm30.net</url>
-      <id>@the-infinite1</id>
+      <url>https://getmoovable.com</url>
+      <id>@the-infinite</id>
     </developer>
   </developers>
 
