@@ -1,5 +1,16 @@
 package io.github.the_infinite.core;
 
+import org.jetbrains.annotations.Nullable;
+
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.Set;
+
 import io.github.the_infinite.core.doc.DocumentationController;
 import io.github.the_infinite.core.env.AppEnvironment;
 import io.github.the_infinite.core.job.JobRegistry;
@@ -7,20 +18,6 @@ import io.github.the_infinite.core.logging.console.ConsoleLogger;
 import io.github.the_infinite.core.logging.correlation.CorrelationContext;
 import io.github.the_infinite.core.queue.QueueConsumer;
 import io.github.the_infinite.core.utils.VertxValidationHelper;
-
-import org.jetbrains.annotations.Nullable;
-
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-
 import io.vertx.core.*;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerOptions;
@@ -45,7 +42,7 @@ public class ConfigurationRegistrant {
   final Router router;
   final Vertx vertx;
   final AtomicBoolean mountedHandlers;
-  private final List<Class<? extends RouteController>> controllers = Collections.synchronizedList(new ArrayList<>());
+  private final Set<Class<? extends RouteController>> controllers = ConcurrentHashMap.newKeySet();
   private ConsoleLogger console;
   private boolean loggedServer = false;
   private boolean loggedWorker = false;
@@ -131,7 +128,7 @@ public class ConfigurationRegistrant {
   }
 
   public String getServerUrl() {
-    return getServerHostInfo(AppEnvironment.getInstance())[0];
+    return getHostInfo(AppEnvironment.getInstance().getServerPort())[0];
   }
 
   public void shutdown() {
@@ -160,59 +157,44 @@ public class ConfigurationRegistrant {
   }
 
   private String[] getServerHostInfo(AppEnvironment env) {
-    try {
-      final var localHost = InetAddress.getLocalHost();
-      return new String[]{"http://" + localHost.getHostName() + ":" + env.getServerPort(), "http://" + localHost.getHostAddress() + ":" + env.getServerPort()};
-    } catch (UnknownHostException e) {
-      return new String[]{"http://localhost:%d".formatted(env.getServerPort()), "http://127.0.0.1:%d".formatted(env.getServerPort())};
-    }
+    return getHostInfo(env.getServerPort());
   }
 
   private String[] getSocketHostInfo(AppEnvironment env) {
+    return getHostInfo(env.getSocketPort());
+  }
+
+  private String[] getHostInfo(int port) {
     try {
       final var localHost = InetAddress.getLocalHost();
-      return new String[]{"http://" + localHost.getHostName() + ":" + env.getSocketPort(), "http://" + localHost.getHostAddress() + ":" + env.getSocketPort()};
+      return new String[]{"http://" + localHost.getHostName() + ":" + port, "http://" + localHost.getHostAddress() + ":" + port};
     } catch (UnknownHostException e) {
-      return new String[]{"http://localhost:%d".formatted(env.getSocketPort()), "http://127.0.0.1:%d".formatted(env.getSocketPort())};
+      return new String[]{"http://localhost:%d".formatted(port), "http://127.0.0.1:%d".formatted(port)};
     }
   }
 
   public void mountController(RouteController controller) {
     //? Auto-mount documentation controller.
-    if (!controllers.contains(DocumentationController.class)) {
+    if (controllers.add(DocumentationController.class)) {
       final var docController = new DocumentationController(vertx);
-      controllers.add(docController.getClass());
-
-      //? Closing this.
-      final var env = AppEnvironment.getInstance();
 
       //? Mount this here.
-      System.out.println();
       console.info(("Created the '\u001B[32m%s\u001B[0m' which listens on '\u001B[36m%s\u001B[0m' ").formatted(docController.getClass().getSimpleName(), docController.basePath)).await();
 
       //? Then do what is required here.
       docController.registerRoutes();
-      System.out.println();
     }
 
     //? This is fine.
-    if (controllers.contains(controller.getClass())) {
+    if (!controllers.add(controller.getClass())) {
       return;
     }
 
-    //? Closing this.
-    final var env = AppEnvironment.getInstance();
-
     //? Mount this here.
-    System.out.println();
     console.info("Created the '\u001B[32m%s\u001B[0m' which listens on '\u001B[36m%s\u001B[0m' ".formatted(controller.getClass().getSimpleName(), controller.basePath)).await();
 
     //? Then do what is required here.
     controller.registerRoutes();
-    System.out.println();
-
-    //? Save it.
-    controllers.add(controller.getClass());
   }
 
   public Future<HttpServer> serve() {
@@ -249,7 +231,7 @@ public class ConfigurationRegistrant {
           serverLocker.writeLock().unlock();
 
           VertxValidationHelper.schemaRepository();
-          final var localhost = getServerHostInfo(env);
+              final var localhost = getServerHostInfo(env);
 
           //? This is fine too.
           console.info("nAPI Routes:  %d".formatted(RouteController.totalCount));
@@ -261,7 +243,6 @@ public class ConfigurationRegistrant {
           console.info("Private URL:  %s".formatted(localhost[1]));
           console.info("Environment:  %s".formatted(env.getKind()));
           timer.end();
-          System.out.println();
         }
 
         //? If this is already logged...
@@ -291,16 +272,16 @@ public class ConfigurationRegistrant {
 
     //? For production environments.
     if (env.getKind() == AppEnvironment.EnvironmentKind.PRODUCTION) {
-      options = new NetServerOptions().setSsl(true).setPort(env.getServerPort()).setReuseAddress(true).setReusePort(true).setUseProxyProtocol(env.getServerCount() > 1);
+      options = new NetServerOptions().setSsl(true).setPort(env.getSocketPort()).setReuseAddress(true).setReusePort(true).setUseProxyProtocol(env.getServerCount() > 1);
     }
 
     //? For non-production environments
     else {
-      options = new NetServerOptions().setSsl(false).setPort(env.getServerPort()).setReuseAddress(true).setReusePort(true).setUseProxyProtocol(env.getServerCount() > 1);
+      options = new NetServerOptions().setSsl(false).setPort(env.getSocketPort()).setReuseAddress(true).setReusePort(true).setUseProxyProtocol(env.getServerCount() > 1);
     }
 
     //? Okay then.
-    final var timer = console.time("Started TCP server on port" + env.getSocketPort());
+    final var timer = console.time("Started TCP server on port " + env.getSocketPort());
 
     //? Create the HTTP server.
     vertx.createNetServer(options).listen(env.getSocketPort()).onFailure(error -> {
@@ -311,8 +292,8 @@ public class ConfigurationRegistrant {
       deployedSockets.put(netServer.hashCode(), netServer);
 
       //? If this is not running on the expected port, log a warning.
-      if (netServer.actualPort() != env.getServerPort()) {
-        console.warn("Listening on a different port " + env.getServerPort());
+      if (netServer.actualPort() != env.getSocketPort()) {
+        console.warn("Listening on a different port " + env.getSocketPort());
       }
 
       //? If this did not deploy anything.
@@ -335,7 +316,6 @@ public class ConfigurationRegistrant {
           console.info("Public URL:   %s".formatted(localhost[0]));
           console.info("Private URL:  %s".formatted(localhost[1]));
           timer.end();
-          System.out.println();
         }
 
         //? This is another slave so unlock this.
@@ -381,7 +361,6 @@ public class ConfigurationRegistrant {
           console.info("Workers:      %d".formatted(deployedWorkers.size()));
           console.info("Total Jobs:   %s".formatted(jobRegistry.jobCount()));
           time.end();
-          System.out.println();
         }
 
         //? If this is already logged...
@@ -417,7 +396,6 @@ public class ConfigurationRegistrant {
           consumerLocker.writeLock().unlock();
           console.info("Consumers:    %d".formatted(deployedConsumers.size()));
           time.end();
-          System.out.println();
         }
 
         //? If this is already logged...

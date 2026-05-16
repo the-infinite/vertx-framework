@@ -33,9 +33,9 @@ public class ServiceResult<T> extends TypedServiceResult<T> {
 
       //? If it is not a naked response, wrap it in a JSON object
       return DataHelpers.serializeObject(new SerializeObject<>(status, message, data));
-    } catch (Throwable e) {
-      throw new RuntimeException(
-        "Prefer using explicit DTOs with proper contracts with explicit mapping for serialization",
+    } catch (Exception e) {
+      throw new IllegalStateException(
+        "Failed to serialize the service result. Prefer explicit DTOs with stable serialization contracts.",
         e
       );
     }
