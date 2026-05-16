@@ -1,5 +1,6 @@
 package io.github.the_infinite.framework.app;
 
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -49,14 +50,20 @@ public final class GenericStartup {
     return vertx;
   }
 
-  public static void bootstrap(StartupOptions options, List<String> mountPaths,
-                               ControllerRegistrar registrar,
-                               @Nullable ConsumerRegistrar consumerRegistrar) {
+  public static void bootstrap(
+    @NotNull StartupOptions options,
+    @NotNull List<String> mountPaths,
+    @NotNull StaticRegistrar staticRegistrar,
+    @NotNull ControllerRegistrar registrar,
+    @Nullable ConsumerRegistrar consumerRegistrar
+  ) {
     final var cpuCount = Runtime.getRuntime().availableProcessors();
     final var staticVertx = createVertxInstance(true, options);
     final var env = AppEnvironment.getInstance();
     final var globalConsole = ConsoleLogger.getInstance(staticVertx);
 
+    //? Now, use the static registrar to register static resources.
+    staticRegistrar.registerStatic(staticVertx);
 
     //? Let us initialize the service configuration itself.
     try {
