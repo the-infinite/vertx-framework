@@ -2,18 +2,18 @@ package io.github.the_infinite.framework.doc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import io.github.the_infinite.framework.RouteController;
-import io.github.the_infinite.framework.doc.impl.ClassicHttpClient;
-import io.github.the_infinite.framework.env.AppEnvironment;
-
 import org.jetbrains.annotations.NotNull;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.*;
 
+import io.github.the_infinite.framework.RouteController;
+import io.github.the_infinite.framework.doc.impl.ClassicHttpClient;
+import io.github.the_infinite.framework.env.AppEnvironment;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
+import io.vertx.ext.web.handler.BodyHandler;
 
 /**
  * Controller that exposes the documentation metadata.
@@ -29,7 +29,7 @@ public class DocumentationController extends RouteController {
 
   @Override
   public void registerRoutes() {
-    registrant.getRouter().route().order(-1).handler(io.vertx.ext.web.handler.BodyHandler.create());
+    registrant.getRouter().route().order(-1).handler(BodyHandler.create());
     registrant.getRouter().route().order(0).handler(context -> {
       String testClient = context.request().getHeader("X-TM30-Test-Client");
       String accept = context.request().getHeader("Accept");
@@ -47,7 +47,7 @@ public class DocumentationController extends RouteController {
 
   private void handleDocumentationRequest(io.vertx.ext.web.RoutingContext context) {
     DocumentationRegistrant registrant = DocumentationRegistrant.getInstance();
-    String htmlContent = renderHtml(registrant);
+    String htmlContent = renderHtml(registrant, context.request().path());
     context.response()
       .putHeader("Content-Type", "text/html")
       .setStatusCode(200)
@@ -117,7 +117,7 @@ public class DocumentationController extends RouteController {
     }
   }
 
-  private String renderHtml(DocumentationRegistrant registrant) {
+  private String renderHtml(DocumentationRegistrant registrant, String documentationPath) {
     StringBuilder html = new StringBuilder();
     boolean isProduction = isProductionEnvironment();
     List<HttpClient> availableHttpClients = getAvailableHttpClients(registrant);
@@ -345,6 +345,7 @@ public class DocumentationController extends RouteController {
       <script>
       const DEFAULT_CLIENT_ID = '%s';
       const IS_PRODUCTION = %s;
+      const DOCUMENTATION_PATH = '%s';
 
       function delay(ms) {
         return new Promise(resolve => window.setTimeout(resolve, ms));
@@ -389,6 +390,40 @@ public class DocumentationController extends RouteController {
       function getSelectedClientName() {
         const clientSelect = document.getElementById('client-select');
         return clientSelect ? clientSelect.value : DEFAULT_CLIENT_ID;
+      }
+
+      function trimTrailingSlash(path) {
+        if (!path || path === '/') {
+          return '';
+        }
+
+        return path.endsWith('/') ? path.slice(0, -1) : path;
+      }
+
+      function resolveServiceBasePath() {
+        const path = DOCUMENTATION_PATH || window.location.pathname || '/';
+        return trimTrailingSlash(path);
+      }
+
+      function joinUrlPath(basePath, routePath) {
+        if (!routePath) {
+          return basePath || '/';
+        }
+
+        const isAbsoluteHttpUrl = routePath.startsWith('http://') || routePath.startsWith('https://');
+        if (isAbsoluteHttpUrl) {
+          return routePath;
+        }
+
+        const normalizedBase = trimTrailingSlash(basePath || '');
+        const normalizedRoute = routePath.startsWith('/') ? routePath : '/' + routePath;
+
+        // Avoid duplicating prefixes when route metadata already contains the mount path.
+        if (normalizedBase && (normalizedRoute === normalizedBase || normalizedRoute.startsWith(normalizedBase + '/'))) {
+          return normalizedRoute;
+        }
+
+        return normalizedBase + normalizedRoute;
       }
 
       function getClientParameters(clientId) {
@@ -529,7 +564,12 @@ public class DocumentationController extends RouteController {
           return;
         }
 
-        let finalUrl = window.location.origin + path;
+        const basePath = resolveServiceBasePath();
+        const resolvedPath = joinUrlPath(basePath, path);
+        const isAbsoluteResolvedUrl = resolvedPath.startsWith('http://') || resolvedPath.startsWith('https://');
+        let finalUrl = isAbsoluteResolvedUrl
+          ? resolvedPath
+          : window.location.origin + resolvedPath;
         const params = {};
         document.querySelectorAll('.path-param-' + routeId).forEach(input => {
           params[input.dataset.param] = input.value;
@@ -587,9 +627,20 @@ public class DocumentationController extends RouteController {
         }
       }
       </script>
-      """.formatted(defaultClientId, Boolean.toString(isProduction)));
+      """.formatted(defaultClientId, Boolean.toString(isProduction),
+      escapeForJsSingleQuotedString(documentationPath)));
     html.append("</body></html>");
     return html.toString();
+  }
+
+  private String escapeForJsSingleQuotedString(String value) {
+    if (value == null) {
+      return "";
+    }
+
+    return value
+      .replace("\\", "\\\\")
+      .replace("'", "\\'");
   }
 
   private boolean isProductionEnvironment() {
