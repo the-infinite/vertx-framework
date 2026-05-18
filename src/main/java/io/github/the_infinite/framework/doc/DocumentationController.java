@@ -401,7 +401,8 @@ public class DocumentationController extends RouteController {
       }
 
       function resolveServiceBasePath() {
-        const path = DOCUMENTATION_PATH || window.location.pathname || '/';
+        const path = window.location.pathname || DOCUMENTATION_PATH || '/';
+        console.log(`Doc path is ${path}`);
         return trimTrailingSlash(path);
       }
 
