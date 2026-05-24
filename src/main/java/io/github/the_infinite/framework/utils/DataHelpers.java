@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -24,6 +25,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import io.github.classgraph.ClassGraph;
+import io.github.classgraph.ScanResult;
 import io.github.the_infinite.framework.ConfigurationRegistrant;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.vertx.core.Future;
@@ -440,6 +443,51 @@ public final class DataHelpers {
     }
 
     return result;
+  }
+
+  /**
+   * Scans the classpath to find all subclasses of a given base class.
+   * @param baseClass The class/interface to find implementors for.
+   * @param packageName The root package to scan (e.g., "io.github.the_infinite") to keep it fast.
+   * @return A list of matching classes.
+   */
+  public static <T> List<Class<? extends T>> findSubclasses(
+    @NotNull Class<T> baseClass,
+    @Nullable String packageName
+  ) {
+    if (packageName == null || packageName.isBlank()) {
+
+      //? ClassGraph uses a try-with-resources block because it opens files
+      try (ScanResult scanResult = new ClassGraph().enableClassInfo().scan()) {
+        return scanResult.getSubclasses(baseClass.getName())
+          .loadClasses(baseClass).stream()
+          .map(cls -> (Class<? extends T>) cls)
+          .collect(Collectors.toList());
+      }
+    }
+
+    //? ClassGraph uses a try-with-resources block because it opens files
+    try (ScanResult scanResult = new ClassGraph()
+      .enableClassInfo()                  // Read class metadata
+      .acceptPackages(packageName)        // Restrict to your app's namespace
+      .scan()) {                          // Execute the scan
+
+      //? Fetch all subclasses and load them into the JVM
+      return scanResult.getSubclasses(baseClass.getName())
+        .loadClasses(baseClass).stream()
+        .map(cls -> (Class<? extends T>) cls)
+        .collect(Collectors.toList());
+    }
+  }
+
+  /**
+   * Scans the classpath to find all subclasses of a given base class.
+   * @param baseClass The class/interface to find implementors for.
+   * @see #findSubclasses(Class, String)
+   * @return A list of matching classes.
+   */
+  public static <T> List<Class<? extends T>> findSubclasses(Class<T> baseClass) {
+    return findSubclasses(baseClass, null);
   }
 
   /**

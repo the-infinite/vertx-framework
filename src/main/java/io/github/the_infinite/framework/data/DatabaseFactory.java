@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.response.ErrorResult;
+import io.github.the_infinite.framework.utils.DataHelpers;
 import io.github.the_infinite.framework.utils.ValidationHelper;
 import io.reactiverse.elasticsearch.client.RestHighLevelClient;
 import io.vertx.core.Future;
@@ -240,7 +241,8 @@ public final class DatabaseFactory {
 
       //? 2. Add Entities Programmatically using MetadataSources
       final var metadataSources = new MetadataSources(registry);
-      BaseEntity.ENTITY_CLASSES.forEach(metadataSources::addAnnotatedClass);
+      final var annotatedClasses = DataHelpers.findSubclasses(BaseEntity.class);
+      annotatedClasses.forEach(metadataSources::addAnnotatedClass);
 
       //? 3. Build Metadata and SessionFactory
       final var sessionFactory = metadataSources.buildMetadata().buildSessionFactory();

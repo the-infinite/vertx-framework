@@ -7,11 +7,9 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.io.Serializable;
 import java.time.OffsetDateTime;
-import java.util.HashSet;
 import java.util.Objects;
 import java.util.UUID;
 
-import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.utils.DataHelpers;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -20,8 +18,6 @@ import lombok.Getter;
 @Getter
 @MappedSuperclass
 public abstract class BaseEntity implements Serializable {
-  static final HashSet<Class<? extends BaseEntity>> ENTITY_CLASSES = new HashSet<>();
-
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   @Column(columnDefinition = "BIGINT", updatable = false, nullable = false, unique = true)
@@ -37,12 +33,6 @@ public abstract class BaseEntity implements Serializable {
   @UpdateTimestamp
   @Column(nullable = false, columnDefinition = "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP")
   private OffsetDateTime updatedAt;
-
-  {
-    if (ENTITY_CLASSES.add(getClass())) {
-      ConsoleLogger.getInstance().debug("Registered entity class %s".formatted(this.getClass().getName()));
-    }
-  }
 
   //? Okay then.
   public BaseEntity() {

@@ -141,7 +141,7 @@ public class MigrationHelper {
   public static boolean generate(Vertx vertx, Mutiny.SessionFactory sessionFactory) {
     final var env = AppEnvironment.getInstance();
     final var console = ConsoleLogger.getInstance(vertx);
-    final var annotatedClasses = BaseEntity.ENTITY_CLASSES;
+    final var annotatedClasses = DataHelpers.findSubclasses(BaseEntity.class);
     final var registryBuilder = new StandardServiceRegistryBuilder();
     final var migrationsRepo = new PersistentRepository<>(MigrationEntry.Modules.SYSTEM, MigrationEntry.class, sessionFactory);
 
@@ -164,13 +164,19 @@ public class MigrationHelper {
       createMigrationsTable(vertx, sessionFactory).await();
     }
 
-    final Map<String, Object> dbConfig = Map.of("jakarta.persistence.jdbc.url", toJDBCUrl(env.getPgUrl()), "hibernate.dialect", org.hibernate.dialect.PostgreSQLDialect.class.getName());
+    final Map<String, Object> dbConfig = Map.of(
+      "jakarta.persistence.jdbc.url", toJDBCUrl(env.getPgUrl()),
+      "hibernate.dialect", org.hibernate.dialect.PostgreSQLDialect.class.getName()
+    );
     registryBuilder.applySettings(dbConfig);
 
     try (final var serviceRegistry = registryBuilder.build()) {
       final var metadataSources = new MetadataSources(serviceRegistry);
       annotatedClasses.forEach(metadataSources::addAnnotatedClass);
       final Metadata metadata = metadataSources.buildMetadata();
+      final var bindings = metadata.getEntityBindings();
+
+      console.info("Found %d/%d entities to generate migrations for.".formatted(bindings.size(), annotatedClasses.size()));
 
       final SchemaManagementTool tool = serviceRegistry.getService(SchemaManagementTool.class);
       if (tool == null) {
