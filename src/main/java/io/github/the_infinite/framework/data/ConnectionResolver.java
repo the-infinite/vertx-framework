@@ -11,11 +11,12 @@ import io.vertx.core.net.ClientSSLOptions;
 import io.vertx.pgclient.PgConnectOptions;
 
 public final class ConnectionResolver extends DefaultSqlClientPoolConfiguration {
-  @Override
-  public PgConnectOptions connectOptions(URI uri) {
-    final var env = AppEnvironment.getInstance();
-    final var options = PgConnectOptions.fromUri(env.getPgUrl());
-    options.setSslOptions(Objects.requireNonNullElse(options.getSslOptions(), new ClientSSLOptions()));
-    return options;
-  }
+    @Override
+    public PgConnectOptions connectOptions(URI uri) {
+      final String overrideUrl = System.getProperty("pg.url.override");
+      final String urlToUse = overrideUrl != null ? overrideUrl : uri.toString();
+      final var options = PgConnectOptions.fromUri(urlToUse);
+      options.setSslOptions(Objects.requireNonNullElse(options.getSslOptions(), new ClientSSLOptions()));
+      return options;
+    }
 }

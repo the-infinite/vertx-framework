@@ -77,7 +77,7 @@ public class MigrationHelper {
             $$ LANGUAGE plpgsql;
         """,
 
-      // Create the migrations tables.
+      // Create the migration tables.
       """
           create table __database_migrations
           (
@@ -156,8 +156,8 @@ public class MigrationHelper {
       return false;
     }
 
-    //? If the migrations table does not exist, then we generate a migration just for the
-    //? creation of the migrations table, since we know that will be needed for any future
+    //? If the migration table does not exist, then we generate a migration just for the
+    //? creation of the migration table, since we know that will be needed for any future
     //? migrations to be applied.
     if (!migrationsRepo.doesTableExist().await()) {
       console.info("Migrations table does not exist, generating initial migration for creating the migrations table...");
@@ -241,7 +241,7 @@ public class MigrationHelper {
       final var outputPath = getMigrationOutputPath(commands.toString());
       final var file = new File(outputPath);
 
-      //? If the parent directory, does not exist, then we have a problem.
+      //? If the parent directory does not exist, then we have a problem.
       if (!file.getParentFile().exists()) {
         try {
           if (file.getParentFile().mkdirs()) {
@@ -254,7 +254,7 @@ public class MigrationHelper {
         }
       }
 
-      //? If we find another migration that applies this same modifications...
+      //? If we find another migration that applies these same modifications...
       if (Arrays.stream(Objects.requireNonNull(file.getParentFile().list())).anyMatch(migrationFile -> {
         final var parts = migrationFile.split("-", 3);
         final var fileParts = file.getName().split("-", 3);
@@ -284,7 +284,7 @@ public class MigrationHelper {
           -- If you would like to modify the generated migration, you can edit this file, but be sure
           -- to keep the statement breakpoint comment between each command, otherwise the
           -- migration will fail to apply.
-          -- Regards, Tobi of TM30%s%s
+          -- Regards, Tobi of Moovable%s%s
           """.formatted(System.lineSeparator(), commands.toString()));
       } catch (Exception e) {
         throw new RuntimeException("Could not write migration file: " + outputPath, e);
@@ -298,12 +298,13 @@ public class MigrationHelper {
    * Executes the migrations that have been generated and not yet applied to the database.
    * This should be run on application startup to ensure the database is up to date.
    */
-  private static void executeMigrations(final ConsoleLogger console, final Mutiny.SessionFactory sessionFactory, final List<File> migrationFiles, final List<MigrationEntry> migrations, final Promise<Void> promise) {
+  private static void executeMigrations(final Vertx vertx, final ConsoleLogger console,
+                                        final Mutiny.SessionFactory sessionFactory, final List<File> migrationFiles, final List<MigrationEntry> migrations, final Promise<Void> promise) {
     //? Fetch this first...
     final var migrationNames = migrations.stream().map(MigrationEntry::getMigrationName).collect(Collectors.toSet());
     final var unappliedMigrations = migrationFiles.stream().filter(file -> !migrationNames.contains(file.getName())).toList();
 
-    //? If we find this then we can continue...
+    //? If we find this, then we can continue...
     if (unappliedMigrations.isEmpty()) {
       console.exec("Nothing to migrate, database is up to date.");
       promise.succeed();
@@ -317,8 +318,8 @@ public class MigrationHelper {
     Multi.createFrom().iterable(unappliedMigrations).onItem().transformToUniAndConcatenate(file -> {
       final String sql;
       try {
-        sql = Files.readString(file.toPath());
-      } catch (IOException e) {
+        sql = vertx.executeBlocking(() -> Files.readString(file.toPath())).await();
+      } catch (Exception e) {
         return Uni.createFrom().failure(e);
       }
 
@@ -333,16 +334,15 @@ public class MigrationHelper {
             final var crc = new CRC32();
             crc.update(sql.getBytes());
 
-            //? Ensure these properties have values, otherwise persist will fail since
+            //? Ensure these properties have values; otherwise persisting will fail since
             // they are non-nullable. The rest of the properties are immutable, so we
             // can set them in the return statement.
-            entry.setUid(UUID.randomUUID());
-
-            //? For the immutable properties in set
+            // For the immutable properties in a set
             return session.persist(
               entry.setMigrationName(file.getName())
                 .setChecksum(crc.getValue())
                 .setData(DataHelpers.toBase64(sql))
+                .setUid(UUID.randomUUID())
             );
           })).onItem().invoke(() -> console.exec("Applied " + file.getName())).onFailure().invoke(error -> {
         console.error("Failed to apply migration " + file.getName() + ": " + error.getMessage());
@@ -353,7 +353,7 @@ public class MigrationHelper {
   }
 
   /**
-   * Main method to run the migration generation standalone.
+   * The main method to run the migration generation standalone.
    */
   public static Future<Void> migrate(Vertx vertx, Mutiny.SessionFactory sessionFactory) {
     try {
@@ -391,12 +391,13 @@ public class MigrationHelper {
         //? If this does not exist, then we can just run the migrations without checking for applied ones, since there are none.
         if (!exists) {
           console.info("Migrations table does not exist, applying all migrations...");
-          createMigrationsTable(vertx, sessionFactory).onFailure(promise::fail).onSuccess(v -> executeMigrations(console, sessionFactory, migrationFiles, List.of(), promise));
+          createMigrationsTable(vertx, sessionFactory).onFailure(promise::fail).onSuccess(v -> executeMigrations(vertx, console, sessionFactory, migrationFiles, List.of(), promise));
           return;
         }
 
-        //? Since it exists, we need to check which migrations have been applied, and only run the ones that have not been applied.
-        migrationsRepo.getMany(null, new RepositoryOptions<MigrationEntry>(CorrelationContext.from(vertx.getOrCreateContext())).setLimit(3000), null).onFailure(promise::fail).onSuccess(migrations -> executeMigrations(console, sessionFactory, migrationFiles, migrations, promise));
+        //? Since it exists, we need to check which migrations have been applied and only run the ones that have not been applied.
+        migrationsRepo.getMany(null,
+          new RepositoryOptions<MigrationEntry>(CorrelationContext.from(vertx.getOrCreateContext())).setLimit(3000), null).onFailure(promise::fail).onSuccess(migrations -> executeMigrations(vertx, console, sessionFactory, migrationFiles, migrations, promise));
       });
 
       return promise.future();

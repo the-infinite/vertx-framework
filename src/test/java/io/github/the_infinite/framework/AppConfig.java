@@ -12,6 +12,7 @@ import io.vertx.core.Vertx;
 @SuppressWarnings({"unused", "resource"})
 public class AppConfig {
   private static Future<Mutiny.SessionFactory> databaseSession;
+  private static PostgreSQLContainer<?> postgreSQLContainer;
 
   private final Vertx vertx;
 
@@ -26,18 +27,13 @@ public class AppConfig {
 
   private String startDatabaseContainer() {
     final var console = ConsoleLogger.getInstance(vertx);
-    try (
-      final var postgreSQLContainer = new PostgreSQLContainer<>("postgres:18-alpine")
+    if (postgreSQLContainer == null) {
+      postgreSQLContainer = new PostgreSQLContainer<>("postgres:18-alpine")
         .withDatabaseName("postgres")
         .withUsername("postgres")
-        .withPassword("vertx-in-action")
-    ) {
+        .withPassword("vertx-in-action");
       postgreSQLContainer.start();
-      return postgreSQLContainer.getJdbcUrl();
-    } catch (Throwable t) {
-      final var error = ErrorResult.of(t);
-      console.error(error.getMessage());
-      return "";
     }
+    return postgreSQLContainer.getJdbcUrl();
   }
 }

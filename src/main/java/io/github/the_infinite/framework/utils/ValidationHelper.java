@@ -12,6 +12,9 @@ public final class ValidationHelper {
   private static final ValidationHelper INSTANCE = new ValidationHelper();
   private final ValidatorFactory factory;
 
+  // Expose the factory as a constant for use in configuration
+  public static final ValidatorFactory VALIDATION_FACTORY = INSTANCE.factory;
+
   private ValidationHelper() {
     factory = Validation.byDefaultProvider()
       .configure()

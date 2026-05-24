@@ -1,15 +1,12 @@
 package io.github.the_infinite.framework.data;
 
-import io.github.the_infinite.framework.env.AppEnvironment;
-import io.github.the_infinite.framework.logging.console.ConsoleLogger;
-import io.github.the_infinite.framework.response.ErrorResult;
-import io.github.the_infinite.framework.utils.ValidationHelper;
-
 import org.apache.http.HttpHost;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.indices.GetIndexRequest;
+import org.hibernate.boot.MetadataSources;
 import org.hibernate.reactive.mutiny.Mutiny;
+import org.hibernate.reactive.provider.ReactiveServiceRegistryBuilder;
 import org.jetbrains.annotations.NotNull;
 
 import java.net.URI;
@@ -17,6 +14,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import io.github.the_infinite.framework.env.AppEnvironment;
+import io.github.the_infinite.framework.logging.console.ConsoleLogger;
+import io.github.the_infinite.framework.response.ErrorResult;
+import io.github.the_infinite.framework.utils.ValidationHelper;
 import io.reactiverse.elasticsearch.client.RestHighLevelClient;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -27,8 +28,6 @@ import io.vertx.rabbitmq.RabbitMQOptions;
 import io.vertx.redis.client.Redis;
 import io.vertx.redis.client.RedisOptions;
 import io.vertx.redis.client.impl.RedisClient;
-import jakarta.persistence.Persistence;
-import jakarta.persistence.PersistenceConfiguration;
 
 @SuppressWarnings("unused")
 public final class DatabaseFactory {
@@ -208,14 +207,15 @@ public final class DatabaseFactory {
     //? Then we log this.
     return vertx.executeBlocking(() -> {
       //? First, build the basics.
-      final var props = new HashMap<>(Map.of(
-        "jakarta.persistence.jdbc.url", toJDBCUrl(options.url),
-        "hibernate.connection.pool_size", options.poolSize,
-        "jakarta.persistence.schema-generation.database.action", options.schemaGenerateAction,
-        "hibernate.vertx.pool.configuration_class", ConnectionResolver.class.getName(),
-        "hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect",
-        PersistenceConfiguration.VALIDATION_FACTORY, ValidationHelper.getInstance().factory()
-      ));
+      final var props = new HashMap<String, Object>();
+      props.put("jakarta.persistence.jdbc.url", toJDBCUrl(options.url));
+      props.put("jakarta.persistence.jdbc.user", options.username);
+      props.put("jakarta.persistence.jdbc.password", options.password);
+      props.put("hibernate.connection.pool_size", options.poolSize);
+      props.put("jakarta.persistence.schema-generation.database.action", options.schemaGenerateAction);
+      props.put("hibernate.vertx.pool.configuration_class", ConnectionResolver.class.getName());
+      props.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
+      props.put("jakarta.persistence.validation.factory", ValidationHelper.getInstance().factory());
 
       //? If this is not a production build.
       if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
@@ -224,14 +224,24 @@ public final class DatabaseFactory {
         props.put("hibernate.highlight_sql", true);
       }
 
-      //? Create the persistence instance.
-      final var factory = Persistence.createEntityManagerFactory(options.unitName, props).unwrap(Mutiny.SessionFactory.class);
+      //? 1. Create the Standard Service Registry
+      final var registry = new ReactiveServiceRegistryBuilder()
+        .applySettings(props)
+        .build();
+
+      //? 2. Add Entities Programmatically using MetadataSources
+      final var metadataSources = new MetadataSources(registry);
+      BaseEntity.ENTITY_CLASSES.forEach(metadataSources::addAnnotatedClass);
+
+      //? 3. Build Metadata and SessionFactory
+      final var sessionFactory = metadataSources.buildMetadata().buildSessionFactory();
+      final var mutinyFactory = sessionFactory.unwrap(Mutiny.SessionFactory.class);
 
       //? Put this in.
-      sessionFactories.put(options.unitName, factory);
+      sessionFactories.put(options.unitName, mutinyFactory);
 
-      //? Then return to the created entity manager factory.
-      return factory;
+      //? Then return to the created mutiny factory.
+      return mutinyFactory;
     }).onSuccess(sessionFactory -> console.exec("Database client is ready\n"));
   }
 
@@ -251,13 +261,65 @@ public final class DatabaseFactory {
     private String schemaGenerateAction;
     private String unitName;
     private String url;
+    private String username;
+    private String password;
 
     public PostgresOptions() {
       final var env = AppEnvironment.getInstance();
       this.poolSize = 10;
       this.schemaGenerateAction = "none";
       this.unitName = "default-pg-instance";
-      this.url = env.getPgUrl();
+
+      // Parse the URL from the environment and extract credentials
+      parseAndSetUrl(env.getPgUrl());
+    }
+
+    private void parseAndSetUrl(String rawUrl) {
+      if (rawUrl == null || rawUrl.isBlank()) {
+        this.url = rawUrl;
+        return;
+      }
+
+      try {
+        // Temporarily remove "jdbc:" so java.net.URI can parse the structure correctly
+        String parsableUrl = rawUrl.startsWith("jdbc:") ? rawUrl.substring(5) : rawUrl;
+        URI uri = URI.create(parsableUrl);
+
+        // 1. Check for standard URI notation: username:password@host
+        String userInfo = uri.getUserInfo();
+        if (userInfo != null && userInfo.contains(":")) {
+          String[] parts = userInfo.split(":", 2);
+          this.username = parts[0];
+          this.password = parts[1];
+
+          // Strip the credentials from the URL so the JDBC driver doesn't get confused
+          this.url = rawUrl.replace(userInfo + "@", "");
+          return;
+        }
+
+        // 2. Check for query parameters:user=...&password=...
+        String query = uri.getQuery();
+        if (query != null) {
+          String[] pairs = query.split("&");
+          for (String pair : pairs) {
+            String[] kv = pair.split("=", 2);
+            if (kv.length == 2) {
+              if (kv[0].equalsIgnoreCase("user") || kv[0].equalsIgnoreCase("username")) {
+                this.username = kv[1];
+              } else if (kv[0].equalsIgnoreCase("password")) {
+                this.password = kv[1];
+              }
+            }
+          }
+        }
+
+        // Keep the original URL if credentials were only in query params (JDBC can usually handle those)
+        this.url = rawUrl;
+
+      } catch (Exception e) {
+        // Fallback to the raw URL if URI parsing fails for any reason
+        this.url = rawUrl;
+      }
     }
 
     public PostgresOptions setPoolSize(short poolSize) {
@@ -271,12 +333,22 @@ public final class DatabaseFactory {
     }
 
     public PostgresOptions setOverrideUrl(String url) {
-      this.url = url;
+      parseAndSetUrl(url); // Reparse if manually overridden
       return this;
     }
 
     public PostgresOptions setUnitName(String unitName) {
       this.unitName = unitName;
+      return this;
+    }
+
+    public PostgresOptions setUsername(String username) {
+      this.username = username;
+      return this;
+    }
+
+    public PostgresOptions setPassword(String password) {
+      this.password = password;
       return this;
     }
   }
