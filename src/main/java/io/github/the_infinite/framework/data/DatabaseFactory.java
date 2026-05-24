@@ -209,8 +209,17 @@ public final class DatabaseFactory {
       //? First, build the basics.
       final var props = new HashMap<String, Object>();
       props.put("jakarta.persistence.jdbc.url", toJDBCUrl(options.url));
-      props.put("jakarta.persistence.jdbc.user", options.username);
-      props.put("jakarta.persistence.jdbc.password", options.password);
+
+      // Inject BOTH standard JPA and Hibernate native properties
+      if (options.username != null && !options.username.isBlank()) {
+        props.put("jakarta.persistence.jdbc.user", options.username);
+        props.put("hibernate.connection.username", options.username);
+      }
+      if (options.password != null && !options.password.isBlank()) {
+        props.put("jakarta.persistence.jdbc.password", options.password);
+        props.put("hibernate.connection.password", options.password);
+      }
+
       props.put("hibernate.connection.pool_size", options.poolSize);
       props.put("jakarta.persistence.schema-generation.database.action", options.schemaGenerateAction);
       props.put("hibernate.vertx.pool.configuration_class", ConnectionResolver.class.getName());
