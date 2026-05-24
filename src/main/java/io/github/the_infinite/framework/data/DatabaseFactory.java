@@ -297,7 +297,7 @@ public final class DatabaseFactory {
           return;
         }
 
-        // 2. Check for query parameters:user=...&password=...
+        // 2. Check for query parameters: user=...&password=...
         String query = uri.getQuery();
         if (query != null) {
           String[] pairs = query.split("&");
