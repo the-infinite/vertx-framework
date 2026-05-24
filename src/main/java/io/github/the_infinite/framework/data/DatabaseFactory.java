@@ -14,6 +14,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import io.github.the_infinite.framework.data.cache.CachingStrategy;
+import io.github.the_infinite.framework.data.cache.InMemoryRegionFactory;
 import io.github.the_infinite.framework.data.cache.RedisRegionFactory;
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
@@ -236,10 +238,14 @@ public final class DatabaseFactory {
       }
 
       //? If caching is enabled...
-      if (options.cachingEnabled) {
+      if (options.cachingStrategy == CachingStrategy.REDIS) {
         props.put("hibernate.cache.use_second_level_cache", true);
         props.put("hibernate.cache.use_query_cache", true);
         props.put("hibernate.cache.region.factory_class", RedisRegionFactory.class.getName());
+      } else if (options.cachingStrategy == CachingStrategy.IN_MEMORY) {
+        props.put("hibernate.cache.use_second_level_cache", true);
+        props.put("hibernate.cache.use_query_cache", true);
+        props.put("hibernate.cache.region.factory_class", InMemoryRegionFactory.class.getName());
       }
 
       //? 1. Create the Standard Service Registry
@@ -289,14 +295,14 @@ public final class DatabaseFactory {
     private String schemaGenerateAction;
     private String unitName;
     private String url;
-    private boolean cachingEnabled;
+    private CachingStrategy cachingStrategy;
     private String username;
     private String password;
 
     public PostgresOptions() {
       final var env = AppEnvironment.getInstance();
       this.poolSize = 10;
-      this.cachingEnabled = true;
+      this.cachingStrategy = CachingStrategy.REDIS;
       this.schemaGenerateAction = "none";
       this.unitName = "default-pg-instance";
 
@@ -314,8 +320,8 @@ public final class DatabaseFactory {
       });
     }
 
-    public PostgresOptions setCachingEnabled(boolean cachingEnabled) {
-      this.cachingEnabled = cachingEnabled;
+    public PostgresOptions setCachingStrategy(CachingStrategy cachingEnabled) {
+      this.cachingStrategy = cachingEnabled;
       return this;
     }
 

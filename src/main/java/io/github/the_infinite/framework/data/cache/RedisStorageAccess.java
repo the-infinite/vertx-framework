@@ -4,53 +4,86 @@ import org.hibernate.cache.spi.support.DomainDataStorageAccess;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
-import io.vertx.core.Vertx;
-import lombok.extern.slf4j.Slf4j;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.params.ScanParams;
 
-@Slf4j
 public class RedisStorageAccess implements DomainDataStorageAccess {
-  private final RedisStorage cache;
+  private final JedisPool jedisPool;
   private final String prefix;
   private final long ttlSeconds;
 
-  public RedisStorageAccess(String regionName, Vertx vertx) {
-    this.cache = new RedisStorage(vertx);
+  public RedisStorageAccess(String regionName, JedisPool jedisPool) {
+    this.jedisPool = jedisPool;
     this.prefix = "hibernate:cache:" + regionName + ":";
     this.ttlSeconds = 3600; // 1-hour default
   }
 
   @Override
   public boolean contains(Object key) {
-    final var value = cache.keyExists(buildKey(key)).await();
-    return value != null && value;
+    try (Jedis jedis = jedisPool.getResource()) {
+      return jedis.exists(buildKey(key));
+    }
   }
 
   @Override
   public Object getFromCache(Object key, SharedSessionContractImplementor session) {
-    final var value = cache.getValue(buildKey(key)).await();
-    if (value == null) return null;
-    return deserialize(value.getBytes());
+    try (Jedis jedis = jedisPool.getResource()) {
+      byte[] data = jedis.get(buildKeyBytes(key));
+      if (data == null) {
+        return null;
+      }
+      return deserialize(data);
+    }
   }
 
   @Override
   public void putIntoCache(Object key, Object value, SharedSessionContractImplementor session) {
     final byte[] serializedValue = serialize(value);
     if (serializedValue == null) return;
-    cache.setValueWithExpiration(buildKey(key), new String(serializedValue), ttlSeconds)
-      .onFailure(err -> log.error("Failed to put item into cache: {}", err.getMessage()));
+
+    try (Jedis jedis = jedisPool.getResource()) {
+      jedis.setex(buildKeyBytes(key), ttlSeconds, serializedValue);
+    }
   }
 
   @Override
   public void removeFromCache(Object key, SharedSessionContractImplementor session) {
-    cache.unlinkKey(buildKey(key)).onFailure(err -> log.error("Failed to remove item from cache: {}", err.getMessage()));
+    try (Jedis jedis = jedisPool.getResource()) {
+      jedis.unlink(buildKeyBytes(key));
+    }
   }
 
   @Override
   public void clearCache(SharedSessionContractImplementor session) {
-    final var keys = cache.findKeys(prefix + "*").await();
-    for (final var key : keys) {
-      cache.unlinkKey(key).onFailure(err -> log.error("Failed to delete key: {}", key));
+    try (Jedis jedis = jedisPool.getResource()) {
+      final byte[] matchPattern = (prefix + "*").getBytes(StandardCharsets.UTF_8);
+
+      // Configure SCAN to fetch 100 keys per iteration matching our region prefix
+      final var params = new ScanParams().match(matchPattern).count(750);
+
+      // Start at the root cursor
+      byte[] cursor = ScanParams.SCAN_POINTER_START_BINARY;
+
+      do {
+        // Execute the paginated scan
+        final var scanResult = jedis.scan(cursor, params);
+        final var keys = scanResult.getResult();
+
+        if (keys != null && !keys.isEmpty()) {
+          // Iterate and individually UNLINK each key asynchronously
+          for (byte[] key : keys) {
+            jedis.unlink(key);
+          }
+        }
+
+        // Update the cursor for the next iteration
+        cursor = scanResult.getCursorAsBytes();
+
+      } while (!Arrays.equals(cursor, ScanParams.SCAN_POINTER_START_BINARY));
     }
   }
 
@@ -66,14 +99,17 @@ public class RedisStorageAccess implements DomainDataStorageAccess {
 
   @Override
   public void release() {
-    // Cleanup resources if necessary when the region shuts down
+    // Pool is managed by the Factory, nothing to do per region.
   }
 
   private String buildKey(Object key) {
     return prefix + key.toString();
   }
 
-  // --- Hibernate Cache Entries are complex Tuples, so we must use Java Serialization ---
+  private byte[] buildKeyBytes(Object key) {
+    return buildKey(key).getBytes(StandardCharsets.UTF_8);
+  }
+
   private byte[] serialize(Object object) {
     try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
          ObjectOutputStream oos = new ObjectOutputStream(bos)) {
