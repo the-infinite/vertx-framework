@@ -1,10 +1,5 @@
 package io.github.the_infinite.framework.data;
 
-import io.github.the_infinite.framework.data.types.ChangeResultModel;
-import io.github.the_infinite.framework.data.types.PaginatedResult;
-import io.github.the_infinite.framework.data.types.RepositoryOptions;
-import io.github.the_infinite.framework.logging.console.ConsoleLogger;
-
 import org.hibernate.reactive.mutiny.Mutiny;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -17,16 +12,25 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
+import io.github.the_infinite.framework.data.types.ChangeResultModel;
+import io.github.the_infinite.framework.data.types.PaginatedResult;
+import io.github.the_infinite.framework.data.types.RepositoryOptions;
+import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.vertx.core.Future;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.Table;
+import lombok.Getter;
 
 @SuppressWarnings({"unused", "FieldCanBeLocal"})
 public final class PersistentRepository<TModel extends BaseEntity, TModule extends Enum<?>> {
+  static final Map<Class<?>, PersistentRepository<?, ?>> instances = new ConcurrentHashMap<>();
   private static final Logger logger = LoggerFactory.getLogger(PersistentRepository.class);
-  private static final Map<Class<?>, PersistentRepository<?, ?>> instances = new ConcurrentHashMap<>();
-
   private final Mutiny.SessionFactory sessionFactory;
+  /**
+   * -- GETTER --
+   *  Returns the specific data module (unique to the calling application) that this repository originates from.
+   */
+  @Getter
   private final TModule module;
   private final Class<TModel> modelType;
   private final StatelessRepositoryActor<TModel> statelessRepositoryActor;
@@ -49,9 +53,9 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
     }
 
     logger.atInfo()
-          .addKeyValue("module", module.name())
-          .addKeyValue("entity", modelType.getName())
-          .log("Mounted a repository in the permission module '{}' for the entity '{}'", module.name(), modelType.getName());
+      .addKeyValue("module", module.name())
+      .addKeyValue("entity", modelType.getName())
+      .log("Mounted a repository in the permission module '{}' for the entity '{}'", module.name(), modelType.getName());
     instances.put(modelType, new PersistentRepository<>(module, modelType, sessionFactory));
   }
 
@@ -97,7 +101,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
   /**
    * A utility function used to check if a database table exists. It is worth noting that although this function is
    * exposed, there are not a lot of use cases I can think of for it. It is primarily used for testing and debugging
-   * purposes, to ensure that the database schema is correctly set up before performing operations that depend on the
+   * purposes to ensure that the database schema is correctly set up before performing operations that depend on the
    * existence of certain tables. In a production environment, this function might not be commonly used, as the
    * application would typically assume that the necessary tables are already in place. Which should be a validated
    * notion by the migration pipeline.
@@ -135,18 +139,18 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * Helper function used to construct a stateful transaction around a given function. It
    * would be nice if Java had native support for promises and async/await like other
    * languages, but it doesn't. So this is what we have to do. This method would
-   * execute function and then fail or succeed the transaction based on
+   * execute a function and then fail or succeed the transaction based on
    * the result of that function.
    * <br/> <br/> It does not have support for checkpoints or partial rollbacks. It rolls
-   * back the entire transaction if any issue was noticed inside of function.
-   * Theoretically, you could implement your own checkpointing system using save-points,
-   * by calling this function inside itself but that is not very pretty.
+   * back the entire transaction if any issue was noticed inside the function.
+   * Theoretically, you could implement your own checkpointing system using save-points
+   * by calling this function inside itself, but that is not very pretty.
    *
    * @param future       A callback that returns a future to execute inside the transaction. If the future fails, the
    *                     transaction is rolled back. If it succeeds, the transaction is committed. The session provided inside
    *                     the callback is the transactional session. It should be used in any repository APIs inside the function.
    * @param <ReturnType> The result of the future.
-   * @return A future that resolves using a database transaction
+   * @return A future that resolves to use a database transaction
    */
   public <ReturnType> Future<ReturnType> transaction(Function<Mutiny.Session, Future<ReturnType>> future) {
     return statefulRepositoryActor.transaction(future);
@@ -172,13 +176,6 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    */
   public Mutiny.SessionFactory database() {
     return this.sessionFactory;
-  }
-
-  /**
-   * Returns the specific data module (unique to the calling application) that this repository originates from.
-   */
-  public TModule getModule() {
-    return this.module;
   }
 
   public Future<Long> getCount(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
@@ -272,7 +269,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
   /**
    * Retrieves a distinct, ordered list of values for a single table.
    * <p>
-   * This is typically used to build filter dropdowns/autocomplete sources (e.g. unique tags, statuses),
+   * This is typically used to build filter dropdowns/autocomplete sources (e.g., unique tags, statuses),
    * while still respecting any provided `filter` constraints and optional cursor-based pagination.
    * <p>
    * Notes:
@@ -380,8 +377,8 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * Updates multiple records in the repository that match the provided filter criteria.
    *
    * @param filter       One or more filter conditions used to determine which records to update.
-   * @param valueChanger The effector function that is invoked on each record to update it, and determine a need for
-   *                     updating it.
+   * @param valueChanger The effector function that is invoked on each record to update it
+   *                     and determine a need for updating it.
    * @param options      Optional repository options, such as a cursor for pagination and a limit (defaulting to 50,000).
    * @param transaction  Optional transaction or database connection to execute the update operation.
    * @return A future resolving to a change result containing the count of affected rows and any additional metadata.
@@ -412,7 +409,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param valueChanger The function that modifies the entity. It returns `true` if the entity was changed, `false` otherwise.
    * @param options      The optional repository options, such as `limit` and `cursor`.
    * @param transaction  The optional transactional session to use for the query. If null, a new session is created.
-   * @return A `Future` that resolves to an `Optional` containing the updated entity, or an empty `Optional` if no entity was updated.
+   * @return A `Future` that resolves to an `Optional` containing the updated entity or an empty `Optional` if no entity was updated.
    */
   public Future<Optional<TModel>> updateOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Mutiny.Session> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
     return this.statefulRepositoryActor.updateOne(filter, valueChanger, options, transaction);
@@ -439,7 +436,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param id           The primary key identifier of the entity to update.
    * @param valueChanger The function that modifies the entity. It returns `true` if the entity was changed, `false` otherwise.
    * @param transaction  The optional transactional session to use for the query. If null, a new session is created.
-   * @return A `Future` that resolves to an `Optional` containing the updated entity, or an empty `Optional` if no entity was updated.
+   * @return A `Future` that resolves to an `Optional` containing the updated entity or an empty `Optional` if no entity was updated.
    */
   public Future<Optional<TModel>> updateById(long id, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Mutiny.Session> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
     return statefulRepositoryActor.updateById(id, valueChanger, options, transaction);
@@ -560,7 +557,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param filter      The optional JPA `CriteriaQuery` used to filter the entity to delete.
    * @param options     The optional pagination options, such as `limit` and `cursor`.
    * @param transaction The optional transactional session to use for the operation. If null, a new session is created.
-   * @return A `Future` that resolves to whether or not this was deleted successfully.
+   * @return A `Future` that resolves whether this was deleted successfully.
    */
   public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter,
                                    @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
@@ -621,7 +618,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    *
    * @param id          The primary key identifier of the entity to delete.
    * @param transaction The optional transactional session to use for the operation. If null, a new session is created.
-   * @return A `Future` that resolves to an `Optional` containing the deleted entity, or an empty `Optional` if no entity was deleted.
+   * @return A `Future` that resolves to an `Optional` containing the deleted entity or an empty `Optional` if no entity was deleted.
    */
   public Future<Optional<TModel>> deleteById(long id, @Nullable Mutiny.Session transaction) {
     return statefulRepositoryActor.deleteById(id, transaction);

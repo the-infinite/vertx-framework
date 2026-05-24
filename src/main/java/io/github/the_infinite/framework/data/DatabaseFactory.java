@@ -204,6 +204,17 @@ public final class DatabaseFactory {
 
     //? Then create and time the connection.
     final var databaseConnectTimer = console.time("Connecting to the PG database for '%s'".formatted(options.unitName));
+    final var annotatedClasses = DataHelpers.findSubclasses(BaseEntity.class);
+    final var repositories = PersistentRepository.instances.keySet();
+
+    //? If we have database classes that are not already registered in the repository instances, we should log a warning about them.
+    for (final var entityClass : annotatedClasses) {
+      if (repositories.contains(entityClass)) {
+        continue;
+      }
+
+      console.warn("Database entity class '%s' has no registered repository instance.".formatted(entityClass.getName()));
+    }
 
     //? Then we log this.
     return vertx.executeBlocking(() -> {
@@ -241,7 +252,6 @@ public final class DatabaseFactory {
 
       //? 2. Add Entities Programmatically using MetadataSources
       final var metadataSources = new MetadataSources(registry);
-      final var annotatedClasses = DataHelpers.findSubclasses(BaseEntity.class);
       annotatedClasses.forEach(metadataSources::addAnnotatedClass);
 
       //? 3. Build Metadata and SessionFactory
