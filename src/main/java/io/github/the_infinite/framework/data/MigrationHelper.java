@@ -144,6 +144,16 @@ public class MigrationHelper {
     final var annotatedClasses = DataHelpers.findSubclasses(BaseEntity.class);
     final var registryBuilder = new StandardServiceRegistryBuilder();
     final var migrationsRepo = new PersistentRepository<>(MigrationEntry.Modules.SYSTEM, MigrationEntry.class, sessionFactory);
+    final var repositories = PersistentRepository.instances.keySet();
+
+    //? If we have database classes that are not already registered in the repository instances, we should log a warning about them.
+    for (final var entityClass : annotatedClasses) {
+      if (repositories.contains(entityClass)) {
+        continue;
+      }
+
+      console.warn("Database entity class '%s' has no registered repository instance.".formatted(entityClass.getName()));
+    }
 
     if (env.getKind() != AppEnvironment.EnvironmentKind.DEVELOPMENT) {
       console.info("Would not attempt to generate migrations outside of development environment.");
