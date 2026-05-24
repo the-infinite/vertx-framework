@@ -1,19 +1,17 @@
 package io.github.the_infinite.framework.utils;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.fasterxml.jackson.annotation.JsonAutoDetect;
-import com.fasterxml.jackson.annotation.PropertyAccessor;
-
-import io.github.the_infinite.framework.ConfigurationRegistrant;
-import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 
 import org.jetbrains.annotations.NotNull;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
@@ -26,6 +24,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import io.github.the_infinite.framework.ConfigurationRegistrant;
+import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 
@@ -99,7 +99,7 @@ public final class DataHelpers {
       return Long.toString(count.longValue()); // Just return this as a string.
     }
 
-    // First do this to store the value inside as an order of magnitude greater than what we return.
+    // First, do this to store the value inside as an order of magnitude greater than what we return.
     // This is to make
     var val = count.longValue() / div;
     val = val / 10; // Now we divide it by 10 and store as a floating point number.
@@ -141,7 +141,7 @@ public final class DataHelpers {
     return String.format("%.2f ms", (double) duration);
   }
 
-  /// Formats the given number with commas as thousands separators.
+  /// Formats the given number with commas as a thousand separators.
   ///
   /// @param number The number to format
   @NotNull
@@ -269,6 +269,61 @@ public final class DataHelpers {
   }
 
   /**
+   * Extracts and decodes query parameters from a URL.
+   * Returns a Map of Lists to safely handle duplicate query parameters.
+   */
+  public static Map<String, List<String>> extractQueryParams(String url) {
+    if (url == null || url.isBlank()) {
+      return Collections.emptyMap();
+    }
+
+    // 1. Isolate the query string
+    int queryStart = url.indexOf('?');
+    if (queryStart == -1 || queryStart == url.length() - 1) {
+      return Collections.emptyMap();
+    }
+
+    String query = url.substring(queryStart + 1);
+
+    // 2. Strip out any URL fragments (#anchor)
+    int fragmentStart = query.indexOf('#');
+    if (fragmentStart != -1) {
+      query = query.substring(0, fragmentStart);
+    }
+
+    // Use LinkedHashMap to preserve the insertion order of parameters
+    Map<String, List<String>> queryPairs = new LinkedHashMap<>();
+    String[] pairs = query.split("&");
+
+    for (String pair : pairs) {
+      if (pair.isEmpty()) continue;
+
+      int idx = pair.indexOf("=");
+
+      try {
+        // 3. Decode the key
+        String key = idx > 0
+          ? URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8)
+          : URLDecoder.decode(pair, StandardCharsets.UTF_8);
+
+        // 4. Decode the value (or default to an empty string if no '=' is present)
+        String value = idx > 0 && pair.length() > idx + 1
+          ? URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8)
+          : "";
+
+        // 5. Add to the list for this key
+        queryPairs.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
+
+      } catch (IllegalArgumentException e) {
+        // Thrown by URLDecoder if the string contains illegal escape patterns (e.g., "%2")
+        System.err.println("Could not decode parameter sequence: " + pair);
+      }
+    }
+
+    return queryPairs;
+  }
+
+  /**
    * Hashes a string using SHA-512.
    */
   public static String hash(String value) {
@@ -393,7 +448,7 @@ public final class DataHelpers {
   public static String createToken(long randomizer, long bounds, int base, String separator, boolean mixedCase) {
     final var random = new Random();
     final var prefix =
-            Long.toString(Instant.now().getEpochSecond(), base) + separator + Long.toString(Math.abs(randomizer), base);
+      Long.toString(Instant.now().getEpochSecond(), base) + separator + Long.toString(Math.abs(randomizer), base);
     final var lengthLimit = bounds + 3;
     final var limit = (int) Math.max(0, lengthLimit - prefix.length());
     final var ending = randomSeed(bounds * randomizer, base, limit, mixedCase, random);

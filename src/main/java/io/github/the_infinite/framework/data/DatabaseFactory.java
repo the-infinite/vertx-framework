@@ -255,9 +255,17 @@ public final class DatabaseFactory {
   }
 
   private static String toJDBCUrl(String url) {
-    final var usedUrl = url.trim();
+    String usedUrl = url.trim();
+
+    // Vert.x and Hibernate strictly require "postgresql", not "postgres"
+    if (usedUrl.startsWith("postgres://")) {
+      usedUrl = usedUrl.replaceFirst("postgres://", "postgresql://");
+    } else if (usedUrl.startsWith("jdbc:postgres://")) {
+      usedUrl = usedUrl.replaceFirst("jdbc:postgres://", "jdbc:postgresql://");
+    }
+
     if (usedUrl.startsWith("jdbc:")) {
-      return url;
+      return usedUrl;
     }
     return "jdbc:%s".formatted(usedUrl);
   }
@@ -284,51 +292,13 @@ public final class DatabaseFactory {
     }
 
     private void parseAndSetUrl(String rawUrl) {
-      if (rawUrl == null || rawUrl.isBlank()) {
-        this.url = rawUrl;
-        return;
-      }
+      final var resolved = ConnectionResolver.resolveUri(rawUrl);
 
-      try {
-        // Temporarily remove "jdbc:" so java.net.URI can parse the structure correctly
-        String parsableUrl = rawUrl.startsWith("jdbc:") ? rawUrl.substring(5) : rawUrl;
-        URI uri = URI.create(parsableUrl);
-
-        // 1. Check for standard URI notation: username:password@host
-        String userInfo = uri.getUserInfo();
-        if (userInfo != null && userInfo.contains(":")) {
-          String[] parts = userInfo.split(":", 2);
-          this.username = parts[0];
-          this.password = parts[1];
-
-          // Strip the credentials from the URL so the JDBC driver doesn't get confused
-          this.url = rawUrl.replace(userInfo + "@", "");
-          return;
-        }
-
-        // 2. Check for query parameters: user=...&password=...
-        String query = uri.getQuery();
-        if (query != null) {
-          String[] pairs = query.split("&");
-          for (String pair : pairs) {
-            String[] kv = pair.split("=", 2);
-            if (kv.length == 2) {
-              if (kv[0].equalsIgnoreCase("user") || kv[0].equalsIgnoreCase("username")) {
-                this.username = kv[1];
-              } else if (kv[0].equalsIgnoreCase("password")) {
-                this.password = kv[1];
-              }
-            }
-          }
-        }
-
-        // Keep the original URL if credentials were only in query params (JDBC can usually handle those)
-        this.url = rawUrl;
-
-      } catch (Exception e) {
-        // Fallback to the raw URL if URI parsing fails for any reason
-        this.url = rawUrl;
-      }
+      resolved.ifPresent(info -> {
+        this.password = info.password();
+        this.username = info.username();
+        this.url = info.url();
+      });
     }
 
     public PostgresOptions setPoolSize(short poolSize) {

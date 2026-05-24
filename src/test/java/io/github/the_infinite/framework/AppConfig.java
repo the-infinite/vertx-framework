@@ -5,7 +5,6 @@ import org.testcontainers.containers.PostgreSQLContainer;
 
 import io.github.the_infinite.framework.data.DatabaseFactory;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
-import io.github.the_infinite.framework.response.ErrorResult;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 
@@ -34,6 +33,6 @@ public class AppConfig {
         .withPassword("vertx-in-action");
       postgreSQLContainer.start();
     }
-    return postgreSQLContainer.getJdbcUrl();
+    return postgreSQLContainer.getJdbcUrl() + "&user=" + postgreSQLContainer.getUsername() + "&password=" + postgreSQLContainer.getPassword();
   }
 }
