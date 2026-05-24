@@ -2,12 +2,6 @@ package io.github.the_infinite.framework.data;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 
-import io.github.the_infinite.framework.ConfigurationRegistrant;
-import io.github.the_infinite.framework.data.types.ChangeResultModel;
-import io.github.the_infinite.framework.data.types.PaginatedResult;
-import io.github.the_infinite.framework.data.types.RepositoryOptions;
-import io.github.the_infinite.framework.utils.AtomHolder;
-
 import org.hibernate.reactive.mutiny.Mutiny;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -15,7 +9,13 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 import java.util.function.Function;
 
+import io.github.the_infinite.framework.ConfigurationRegistrant;
+import io.github.the_infinite.framework.data.types.ChangeResultModel;
+import io.github.the_infinite.framework.data.types.PaginatedResult;
+import io.github.the_infinite.framework.data.types.RepositoryOptions;
+import io.github.the_infinite.framework.utils.AtomHolder;
 import io.smallrye.mutiny.Uni;
+import io.smallrye.mutiny.unchecked.Unchecked;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import jakarta.persistence.LockModeType;
@@ -26,8 +26,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  protected <T> Future<T> getOrCreateSession(@Nullable Mutiny.Session transaction,
-                                             SessionBoundHandler<Mutiny.Session, T> handler) {
+  protected <T> Future<T> getOrCreateSession(@Nullable Mutiny.Session transaction, SessionBoundHandler<Mutiny.Session, T> handler) {
     final var globalVertx = ConfigurationRegistrant.vertx();
     final var context = globalVertx.getOrCreateContext();
     final var promise = Promise.<T>promise();
@@ -77,7 +76,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
 
   @Override
   public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
-//? This is fine.
+    //? This is fine.
     final var usedCursor = options == null ? null : options.getCursor();
     final var usedLimit = options == null ? 30 : options.getLimit();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
@@ -87,7 +86,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     return this.getOrCreateSession(transaction, (session, context) -> session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult().chain(count -> {
       countAtom.set(count);
       return session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
-    }).map(data -> {
+    }).map(Unchecked.function(data -> {
       String nextCursor = null;
 
       try {
@@ -99,7 +98,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
       }
 
       return new PaginatedResult<>(data, usedLimit, countAtom.get(), usedCursor, nextCursor);
-    }));
+    })));
   }
 
   @Override
@@ -277,8 +276,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter,
-                                   @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+  public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
     //? This is fine.
     final var usedCursor = options == null ? null : options.getCursor();
 

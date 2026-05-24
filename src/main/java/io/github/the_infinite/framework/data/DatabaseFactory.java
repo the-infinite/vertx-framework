@@ -259,7 +259,10 @@ public final class DatabaseFactory {
       annotatedClasses.removeIf(cls -> cls == BaseAuditableEntity.class || cls == BaseEntity.class);
       annotatedClasses.forEach(metadataSources::addAnnotatedClass);
 
-      //? 3. Build Metadata and SessionFactory
+      //? 3. Add support for managing migrations at this point.
+      metadataSources.addAnnotatedClass(MigrationEntry.class);
+
+      //? 4. Build Metadata and SessionFactory
       final var sessionFactory = metadataSources.buildMetadata().buildSessionFactory();
       final var mutinyFactory = sessionFactory.unwrap(Mutiny.SessionFactory.class);
 

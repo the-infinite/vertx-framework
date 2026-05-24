@@ -27,7 +27,7 @@ import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 
-@SuppressWarnings({"unused", "CallToPrintStackTrace"})
+@SuppressWarnings({"unused", "CallToPrintStackTrace", "BlockingMethodInNonBlockingContext"})
 public class MigrationHelper {
   private static final String STATEMENT_BREAKPOINT = "--end of statement";
 
@@ -187,8 +187,6 @@ public class MigrationHelper {
       final Metadata metadata = metadataSources.buildMetadata();
       final var bindings = metadata.getEntityBindings();
 
-      console.info("Found %d/%d entities to generate migrations for.".formatted(bindings.size(), annotatedClasses.size()));
-
       final SchemaManagementTool tool = serviceRegistry.getService(SchemaManagementTool.class);
       if (tool == null) {
         throw new IllegalStateException("SchemaManagementTool service could not be retrieved");
@@ -288,6 +286,9 @@ public class MigrationHelper {
         return false;
       }
 
+      //? Doing the most.
+      console.info("Found %d entities to generate migrations for.".formatted(bindings.size()));
+
       //? Now you can say you are doing this because you really are.
       console.info("Generating migration script at " + outputPath.getPath());
 
@@ -315,8 +316,7 @@ public class MigrationHelper {
    * Executes the migrations that have been generated and not yet applied to the database.
    * This should be run on application startup to ensure the database is up to date.
    */
-  private static void executeMigrations(final Vertx vertx, final ConsoleLogger console,
-                                        final Mutiny.SessionFactory sessionFactory, final List<File> migrationFiles, final List<MigrationEntry> migrations, final Promise<Void> promise) {
+  private static void executeMigrations(final ConsoleLogger console, final Mutiny.SessionFactory sessionFactory, final List<File> migrationFiles, final List<MigrationEntry> migrations, final Promise<Void> promise) {
     //? Fetch this first...
     final var migrationNames = migrations.stream().map(MigrationEntry::getMigrationName).collect(Collectors.toSet());
     final var unappliedMigrations = migrationFiles.stream().filter(file -> !migrationNames.contains(file.getName())).toList();
@@ -335,13 +335,13 @@ public class MigrationHelper {
     Multi.createFrom().iterable(unappliedMigrations).onItem().transformToUniAndConcatenate(file -> {
       final String sql;
       try {
-        sql = vertx.executeBlocking(() -> Files.readString(file.toPath())).await();
+        sql = Files.readString(file.toPath());
       } catch (Exception e) {
         return Uni.createFrom().failure(e);
       }
 
       console.info("Applying migration " + file.getName());
-      return sessionFactory.withTransaction((session, tx) ->
+      return sessionFactory.withStatelessTransaction((session, tx) ->
         Multi.createFrom()
           .iterable(Arrays.stream(sql.split(STATEMENT_BREAKPOINT))
             .map(cmd -> "%s;".formatted(cmd).trim()).filter(cmd -> !cmd.equals(";")).toList()).onItem()
@@ -355,7 +355,7 @@ public class MigrationHelper {
             // they are non-nullable. The rest of the properties are immutable, so we
             // can set them in the return statement.
             // For the immutable properties in a set
-            return session.persist(
+            return session.insert(
               entry.setMigrationName(file.getName())
                 .setChecksum(crc.getValue())
                 .setData(DataHelpers.toBase64(sql))
@@ -408,13 +408,18 @@ public class MigrationHelper {
         //? If this does not exist, then we can just run the migrations without checking for applied ones, since there are none.
         if (!exists) {
           console.info("Migrations table does not exist, applying all migrations...");
-          createMigrationsTable(vertx, sessionFactory).onFailure(promise::fail).onSuccess(v -> executeMigrations(vertx, console, sessionFactory, migrationFiles, List.of(), promise));
+          createMigrationsTable(vertx, sessionFactory).onFailure(promise::fail).onSuccess(v -> executeMigrations(console, sessionFactory, migrationFiles, List.of(), promise));
           return;
         }
 
         //? Since it exists, we need to check which migrations have been applied and only run the ones that have not been applied.
-        migrationsRepo.getMany(null,
-          new RepositoryOptions<MigrationEntry>(CorrelationContext.from(vertx.getOrCreateContext())).setLimit(3000), null).onFailure(promise::fail).onSuccess(migrations -> executeMigrations(vertx, console, sessionFactory, migrationFiles, migrations, promise));
+        migrationsRepo.getMany(
+            null,
+            new RepositoryOptions<MigrationEntry>(CorrelationContext.from(vertx.getOrCreateContext())).setLimit(3000),
+            null
+          )
+          .onFailure(promise::fail)
+          .onSuccess(migrations -> executeMigrations(console, sessionFactory, migrationFiles, migrations, promise));
       });
 
       return promise.future();
