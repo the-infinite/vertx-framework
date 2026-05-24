@@ -10,7 +10,7 @@ import io.vertx.core.Vertx;
 /**
  * An in-memory implementation of RateLimiter.
  */
-public class InMemoryRateLimiter implements RateLimiter {
+class InMemoryRateLimiter implements RateLimiter {
   private final Map<String, RateLimitState> states = new ConcurrentHashMap<>();
 
   public InMemoryRateLimiter(Vertx vertx) {

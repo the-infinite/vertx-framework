@@ -1,9 +1,12 @@
 package io.github.the_infinite.framework.middleware;
 
+import java.util.Objects;
+
 import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
 import io.github.the_infinite.framework.middleware.rate.RateLimiter;
 import io.github.the_infinite.framework.response.ErrorResult;
 
+import io.github.the_infinite.framework.utils.DataHelpers;
 import io.vertx.core.Handler;
 
 /**
@@ -23,7 +26,8 @@ public final class GeneralMiddlewares {
     return ctx -> {
       final var correlationId = ctx.router().request().getHeader("X-Correlation-ID");
       if (correlationId != null && !correlationId.isEmpty()) {
-        ctx.withCorrelationId(correlationId);
+        ctx.withCorrelationId(correlationId).router().next();
+        return;
       }
       ctx.router().next();
     };
@@ -39,19 +43,21 @@ public final class GeneralMiddlewares {
   public static Handler<CorrelationContext> rateLimiter(RateLimiter limiter, int limit) {
     return ctx -> {
       final var request = ctx.router().request();
-      final var ip = request.remoteAddress().host();
+      final var id = ctx.userId().orElse(request.remoteAddress().host());
+      final var path = DataHelpers.toBase64(request.path());
+      final var key = "%s:%s".formatted(id, path);
 
-      limiter.isAllowed(ip, limit).onComplete(ar -> {
-        if (ar.succeeded()) {
-          if (ar.result()) {
-            ctx.router().next();
-          } else {
-            ctx.router().fail(new ErrorResult("Too many requests", request.path(), 429));
-          }
-        } else {
-          ctx.router().fail(ar.cause());
+      limiter.isAllowed(key, limit).onSuccess(underLimit -> {
+        //? If there is still room to make this request...
+        if (underLimit) {
+          ctx.router().next();
         }
-      });
+
+        //? As there is no room...
+        else {
+          ctx.router().fail(new ErrorResult("Too many requests", request.path(), 429));
+        }
+      }).onFailure(err -> ctx.router().fail(Objects.requireNonNullElse(err.getCause(), err)));
     };
   }
 

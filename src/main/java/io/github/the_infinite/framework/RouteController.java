@@ -1,19 +1,21 @@
 package io.github.the_infinite.framework;
 
 
-import io.github.the_infinite.framework.doc.DocumentationRegistrant;
-import io.github.the_infinite.framework.doc.RouteDescription;
-import io.github.the_infinite.framework.env.AppEnvironment;
-import io.github.the_infinite.framework.logging.console.ConsoleLogger;
-import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
-import io.github.the_infinite.framework.response.ErrorResult;
-import io.github.the_infinite.framework.response.TypedServiceResult;
-
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.the_infinite.framework.doc.DocumentationRegistrant;
+import io.github.the_infinite.framework.doc.RouteDescription;
+import io.github.the_infinite.framework.env.AppEnvironment;
+import io.github.the_infinite.framework.logging.console.ConsoleLogger;
+import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
+import io.github.the_infinite.framework.middleware.GeneralMiddlewares;
+import io.github.the_infinite.framework.middleware.rate.LimiterFactory;
+import io.github.the_infinite.framework.middleware.rate.RateLimiter;
+import io.github.the_infinite.framework.response.ErrorResult;
+import io.github.the_infinite.framework.response.TypedServiceResult;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
@@ -26,6 +28,7 @@ import io.vertx.ext.web.handler.StaticHandler;
 public abstract class RouteController {
   private static final Logger logger = LoggerFactory.getLogger(RouteController.class);
   static int totalCount = 0;
+  private static RateLimiter limiter;
   protected final String basePath;
   protected final ConfigurationRegistrant registrant;
   private final int version;
@@ -37,6 +40,12 @@ public abstract class RouteController {
 
     //? if this registrant has not mounted error handlers yet...
     if (registrant.mountedHandlers.compareAndSet(false, true)) {
+      //? Absorb the correlation ID as needed.
+      registrant.router.route().handler(wrapMiddleware(GeneralMiddlewares.correlationIdExtractor()));
+
+      //? Mount this one too.
+      registrant.router.route().handler(wrapMiddleware(GeneralMiddlewares.paginationParamsExtractor()));
+
       //? Then mount the error handlers.
       registrant.router.errorHandler(404, context -> {
         final var errorResult = new ErrorResult("The requested resource was not" + " found", context.request().path(), 404);
@@ -212,12 +221,16 @@ public abstract class RouteController {
     return noTrailingSlash("/v%d/%s/%s".formatted(this.version, this.basePath, path));
   }
 
+  private Handler<CorrelationContext> makeRateLimiterOf(RouteDescription description) {
+    if (limiter == null) {
+      limiter = LimiterFactory.create(registrant.manager());
+    }
+    return GeneralMiddlewares.rateLimiter(limiter, description.rateLimit());
+  }
+
 
   @SafeVarargs
-  private <T> void mount(@NotNull String path,
-                         boolean hasBody, @NotNull HttpMethod method,
-                         @NotNull RouteDescription description,
-                         RouteHandler<T> handler, Handler<CorrelationContext>... middlewares) {
+  private <T> void mount(@NotNull String path, boolean hasBody, @NotNull HttpMethod method, @NotNull RouteDescription description, RouteHandler<T> handler, Handler<CorrelationContext>... middlewares) {
     final String fullPath = calculateFullPath(path);
 
     DocumentationRegistrant.getInstance().registerRoute(fullPath, method.name(), this.getClass().getSimpleName(), description);
@@ -225,6 +238,11 @@ public abstract class RouteController {
     //? If this has a body...
     if (hasBody) {
       registrant.router.route().method(method).path(fullPath).handler(BodyHandler.create());
+    }
+
+    //? If this actually has a rate limit...
+    if (description.rateLimit() != null && description.rateLimit() > 0) {
+      registrant.router.route().method(method).path(fullPath).handler(wrapMiddleware(makeRateLimiterOf(description)));
     }
 
     // Registration logic goes here
@@ -240,11 +258,7 @@ public abstract class RouteController {
 
     //? Now, mount it.
     registrant.vertx.executeBlocking(() -> {
-      logger.atInfo()
-        .addKeyValue("handler", getClass().getSimpleName())
-        .addKeyValue("method", method.name())
-        .addKeyValue("path", fullPath)
-        .log("Mounted a '\u001B[32m{}\u001B[0m' handler which listens on  '\u001B[36m{}\u001B[0m'", method.name(), fullPath);
+      logger.atInfo().addKeyValue("handler", getClass().getSimpleName()).addKeyValue("method", method.name()).addKeyValue("path", fullPath).log("Mounted a '\u001B[32m{}\u001B[0m' handler which listens on  '\u001B[36m{}\u001B[0m'", method.name(), fullPath);
       return null;
     }).await();
 
@@ -272,9 +286,7 @@ public abstract class RouteController {
 
 
   @SafeVarargs
-  protected final <T> void mountPatch(String path,
-                                      boolean hasBody, @NotNull RouteDescription description, RouteHandler<T> handler,
-                                      @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountPatch(String path, boolean hasBody, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
     mount(path, hasBody, HttpMethod.PATCH, description, handler, middlewares);
   }
 
