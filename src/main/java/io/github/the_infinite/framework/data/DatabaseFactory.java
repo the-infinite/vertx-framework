@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import io.github.the_infinite.framework.data.cache.RedisRegionFactory;
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.response.ErrorResult;
@@ -234,6 +235,13 @@ public final class DatabaseFactory {
         props.put("hibernate.highlight_sql", true);
       }
 
+      //? If caching is enabled...
+      if (options.cachingEnabled) {
+        props.put("hibernate.cache.use_second_level_cache", true);
+        props.put("hibernate.cache.use_query_cache", true);
+        props.put("hibernate.cache.region.factory_class", RedisRegionFactory.class.getName());
+      }
+
       //? 1. Create the Standard Service Registry
       final var registry = new ReactiveServiceRegistryBuilder()
         .applySettings(props)
@@ -281,12 +289,14 @@ public final class DatabaseFactory {
     private String schemaGenerateAction;
     private String unitName;
     private String url;
+    private boolean cachingEnabled;
     private String username;
     private String password;
 
     public PostgresOptions() {
       final var env = AppEnvironment.getInstance();
       this.poolSize = 10;
+      this.cachingEnabled = true;
       this.schemaGenerateAction = "none";
       this.unitName = "default-pg-instance";
 
@@ -302,6 +312,11 @@ public final class DatabaseFactory {
         this.username = info.username();
         this.url = info.url();
       });
+    }
+
+    public PostgresOptions setCachingEnabled(boolean cachingEnabled) {
+      this.cachingEnabled = cachingEnabled;
+      return this;
     }
 
     public PostgresOptions setPoolSize(short poolSize) {

@@ -1,13 +1,12 @@
 package io.github.the_infinite.framework.data.cache;
 
-import io.github.the_infinite.framework.data.DatabaseFactory;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import io.github.the_infinite.framework.data.DatabaseFactory;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.redis.client.RedisAPI;
@@ -79,6 +78,10 @@ public final class RedisStorage {
 
   public Future<Long> deleteKey(String key) {
     return mapResponse(api.del(List.of(key)), Response::toLong, 0L);
+  }
+
+  public Future<Long> unlinkKey(String key) {
+    return mapResponse(api.unlink(List.of(key)), Response::toLong, 0L);
   }
 
   public Future<Long> deleteKeys(List<String> keys) {
