@@ -142,6 +142,7 @@ public class MigrationHelper {
     final var env = AppEnvironment.getInstance();
     final var console = ConsoleLogger.getInstance(vertx);
     final var annotatedClasses = DataHelpers.findSubclasses(BaseEntity.class);
+    annotatedClasses.removeIf(cls -> cls == BaseAuditableEntity.class || cls == BaseEntity.class);
     final var registryBuilder = new StandardServiceRegistryBuilder();
     final var migrationsRepo = new PersistentRepository<>(MigrationEntry.Modules.SYSTEM, MigrationEntry.class, sessionFactory);
     final var repositories = PersistentRepository.instances.keySet();

@@ -242,6 +242,7 @@ public final class DatabaseFactory {
       //? 2. Add Entities Programmatically using MetadataSources
       final var metadataSources = new MetadataSources(registry);
       final var annotatedClasses = DataHelpers.findSubclasses(BaseEntity.class);
+      annotatedClasses.removeIf(cls -> cls == BaseAuditableEntity.class || cls == BaseEntity.class);
       annotatedClasses.forEach(metadataSources::addAnnotatedClass);
 
       //? 3. Build Metadata and SessionFactory
