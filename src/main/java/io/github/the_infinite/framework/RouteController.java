@@ -40,11 +40,14 @@ public abstract class RouteController {
 
     //? if this registrant has not mounted error handlers yet...
     if (registrant.mountedHandlers.compareAndSet(false, true)) {
+      //? The middleware route mounts
+      final var middlewareRoute = registrant.router.route();
+
       //? Absorb the correlation ID as needed.
-      registrant.router.route().handler(wrapMiddleware(GeneralMiddlewares.correlationIdExtractor()));
+      middlewareRoute.handler(wrapMiddleware(GeneralMiddlewares.correlationIdExtractor()));
 
       //? Mount this one too.
-      registrant.router.route().handler(wrapMiddleware(GeneralMiddlewares.paginationParamsExtractor()));
+      middlewareRoute.handler(wrapMiddleware(GeneralMiddlewares.paginationParamsExtractor()));
 
       //? Then mount the error handlers.
       registrant.router.errorHandler(404, context -> {
@@ -234,27 +237,28 @@ public abstract class RouteController {
     final String fullPath = calculateFullPath(path);
 
     DocumentationRegistrant.getInstance().registerRoute(fullPath, method.name(), this.getClass().getSimpleName(), description);
+    final var route = registrant.router.route().method(method).path(fullPath);
 
     //? If this has a body...
     if (hasBody) {
-      registrant.router.route().method(method).path(fullPath).handler(BodyHandler.create());
+      route.handler(BodyHandler.create());
     }
 
     //? If this actually has a rate limit...
     if (description.rateLimit() != null && description.rateLimit() > 0) {
-      registrant.router.route().method(method).path(fullPath).handler(wrapMiddleware(makeRateLimiterOf(description)));
+      route.handler(wrapMiddleware(makeRateLimiterOf(description)));
     }
 
     // Registration logic goes here
     if (middlewares != null) {
       for (final var middleware : middlewares) {
         if (middleware == null) continue;
-        registrant.router.route().path(fullPath).handler(wrapMiddleware(middleware));
+        route.handler(wrapMiddleware(middleware));
       }
     }
 
     //? This is fine.
-    registrant.router.route().method(method).path(fullPath).last().handler(wrapHandler(handler));
+    route.last().handler(wrapHandler(handler));
 
     //? Now, mount it.
     registrant.vertx.executeBlocking(() -> {
@@ -418,15 +422,17 @@ public abstract class RouteController {
       fullPath = noTrailingSlash("/v%d/%s/%s/*".formatted(this.version, this.basePath, path));
     }
 
+    final var route = registrant.router.route().path(fullPath);
+
     if (middlewares != null) {
       for (final var middleware : middlewares) {
         if (middleware == null) continue;
-        registrant.router.route().path(fullPath).handler(wrapMiddleware(middleware));
+        route.handler(wrapMiddleware(middleware));
       }
     }
 
     //? This is fine
-    registrant.router.route(fullPath).blockingHandler(StaticHandler.create(fileSystemPath));
+    route.blockingHandler(StaticHandler.create(fileSystemPath));
 
     //? Log this kind of.
     if (ConfigurationRegistrant.deployedServers.size() == AppEnvironment.getInstance().getServerCount() - 1) {
