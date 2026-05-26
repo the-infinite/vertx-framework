@@ -23,6 +23,11 @@ import io.vertx.core.http.HttpMethod;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.handler.StaticHandler;
+import io.vertx.ext.web.validation.builder.Bodies;
+import io.vertx.ext.web.validation.builder.ValidationHandlerBuilder;
+import io.vertx.json.schema.JsonSchemaOptions;
+import io.vertx.json.schema.SchemaRepository;
+import io.vertx.json.schema.common.dsl.Schemas;
 
 @SuppressWarnings({"unused", "CallToPrintStackTrace"})
 public abstract class RouteController {
@@ -239,17 +244,54 @@ public abstract class RouteController {
     DocumentationRegistrant.getInstance().registerRoute(fullPath, method.name(), this.getClass().getSimpleName(), description);
     final var route = registrant.router.route().method(method).path(fullPath);
 
-    //? If this has a body...
+    //? 1. Handle Body Processing & Validation Safely
     if (hasBody) {
-      route.handler(BodyHandler.create());
+      final Class<?> expectedClass = description.requestBodyClass();
+
+      if (expectedClass == null) {
+        throw new IllegalArgumentException("Request body class must be specified in the route description.");
+      }
+
+      if (expectedClass != Void.class) {
+        // MUST mount BodyHandler first. Vert.x will not read the HTTP buffer into memory without this.
+        route.handler(BodyHandler.create());
+
+        // Use Vert.x 5's SchemaRepository
+        final var schemaRepository = SchemaRepository.create(
+          new JsonSchemaOptions()
+        );
+
+        //? Okay then.
+        final var builder = ValidationHandlerBuilder.create(schemaRepository);
+
+        // If expecting a raw String, enforce text/plain
+        if (expectedClass == String.class) {
+          route.consumes("text/plain");
+          // We don't add strict body schemas here; Vert.x will just pass the raw buffer through safely
+        }
+
+        // If expecting a POJO, we seamlessly accept JSON, Form-Encoded, and Multipart!
+        // Vert.x Validation Handler will parse and normalize all three into a JsonObject.
+        else {
+          final var genericSchema = Schemas.schema();
+          final var objectSchema = Schemas.objectSchema();
+
+          builder.body(Bodies.json(genericSchema))
+            .body(Bodies.formUrlEncoded(objectSchema))
+            .body(Bodies.multipartFormData(objectSchema));
+        }
+
+        // D. Build and attach the validator
+        route.handler(builder.build());
+      }
     }
 
-    //? If this actually has a rate limit...
+    //? 2. If this actually has a rate limit...
     if (description.rateLimit() != null && description.rateLimit() > 0) {
       route.handler(wrapMiddleware(makeRateLimiterOf(description)));
     }
 
-    // Registration logic goes here
+    //? 3. Mount all custom middlewares
     if (middlewares != null) {
       for (final var middleware : middlewares) {
         if (middleware == null) continue;
@@ -257,12 +299,16 @@ public abstract class RouteController {
       }
     }
 
-    //? This is fine.
+    //? 4. Mount the actual business logic handler
     route.last().handler(wrapHandler(handler));
 
-    //? Now, mount it.
+    //? 5. Now, mount and log it.
     registrant.vertx.executeBlocking(() -> {
-      logger.atInfo().addKeyValue("handler", getClass().getSimpleName()).addKeyValue("method", method.name()).addKeyValue("path", fullPath).log("Mounted a '\u001B[32m{}\u001B[0m' handler which listens on  '\u001B[36m{}\u001B[0m'", method.name(), fullPath);
+      logger.atInfo()
+        .addKeyValue("handler", getClass().getSimpleName())
+        .addKeyValue("method", method.name())
+        .addKeyValue("path", fullPath)
+        .log("Mounted a '\u001B[32m{}\u001B[0m' handler which listens on  '\u001B[36m{}\u001B[0m'", method.name(), fullPath);
       return null;
     }).await();
 

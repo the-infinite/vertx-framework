@@ -5,11 +5,11 @@ import org.jetbrains.annotations.Nullable;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.Set;
 
 import io.github.the_infinite.framework.doc.DocumentationController;
 import io.github.the_infinite.framework.env.AppEnvironment;
@@ -17,7 +17,6 @@ import io.github.the_infinite.framework.job.JobRegistry;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
 import io.github.the_infinite.framework.queue.QueueConsumer;
-import io.github.the_infinite.framework.utils.VertxValidationHelper;
 import io.vertx.core.*;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerOptions;
@@ -230,8 +229,7 @@ public class ConfigurationRegistrant {
           loggedServer = true;
           serverLocker.writeLock().unlock();
 
-          VertxValidationHelper.schemaRepository();
-              final var localhost = getServerHostInfo(env);
+          final var localhost = getServerHostInfo(env);
 
           //? This is fine too.
           console.info("nAPI Routes:  %d".formatted(RouteController.totalCount));
