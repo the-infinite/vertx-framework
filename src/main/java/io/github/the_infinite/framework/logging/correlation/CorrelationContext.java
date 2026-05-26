@@ -4,6 +4,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Optional;
 
+import io.github.the_infinite.framework.response.ErrorResult;
 import io.github.the_infinite.framework.utils.DataHelpers;
 import io.vertx.core.Context;
 import io.vertx.core.Promise;
@@ -112,12 +113,45 @@ public final class CorrelationContext {
 
   /// Gets the request body of this correlation context. This cannot be set if this
   /// correlation context was not created with a `RoutingContext`.
-  public <TBody extends Record> TBody body(Class<TBody> type) {
+  public <TBody> TBody body(Class<TBody> type) throws ErrorResult {
     if (routingContext == null) {
       throw new UnsupportedOperationException("Cannot get request body because this is not a correlation group of a HTTP request");
     }
-    var params = params();
-    return params.body().getJsonObject().mapTo(type);
+
+    // 1. Handle Plain Text directly from the buffer
+    if (type == String.class) {
+      return type.cast(routingContext.body().asString());
+    }
+
+    try {
+      final var params = params();
+
+      if (params != null) {
+        final var validatedBody = params.body();
+
+        if (validatedBody == null) {
+          throw new IllegalArgumentException("Request body is empty or the Content-Type header is missing/unsupported.");
+        }
+
+        if (validatedBody.isJsonObject()) {
+          return validatedBody.getJsonObject().mapTo(type);
+        }
+      }
+
+      final var rawBody = routingContext.body();
+      if (rawBody == null || rawBody.isEmpty()) {
+        throw new IllegalArgumentException("Request body is empty.");
+      }
+      return rawBody.asPojo(type);
+    } catch (IllegalArgumentException e) {
+      Throwable cause = e;
+
+      if (e.getCause() != null) {
+        cause = e.getCause();
+      }
+
+      throw ErrorResult.of(cause);
+    }
   }
 
   public CorrelationContext withCorrelationId(String id) {

@@ -1,9 +1,11 @@
 package io.github.the_infinite.framework.response;
 
 import io.github.the_infinite.framework.utils.DataHelpers;
+import lombok.Getter;
 
 @SuppressWarnings("unused")
 public class ServiceResult<T> extends TypedServiceResult<T> {
+  @Getter
   protected final String status;
 
   private boolean naked;
@@ -12,10 +14,6 @@ public class ServiceResult<T> extends TypedServiceResult<T> {
     super(ResponseType.JSON, message, data, code);
     this.status = status;
     this.naked = false;
-  }
-
-  public String getStatus() {
-    return status;
   }
 
   public ServiceResult<T> stripped() {

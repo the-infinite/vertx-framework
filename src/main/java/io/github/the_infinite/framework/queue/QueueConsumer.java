@@ -1,5 +1,13 @@
 package io.github.the_infinite.framework.queue;
 
+import com.rabbitmq.client.AMQP;
+
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+
 import io.github.the_infinite.framework.data.DatabaseFactory;
 import io.github.the_infinite.framework.data.types.QueueConsumerHandler;
 import io.github.the_infinite.framework.env.AppEnvironment;
@@ -8,15 +16,6 @@ import io.github.the_infinite.framework.logging.monitor.LogEvent;
 import io.github.the_infinite.framework.logging.monitor.MonitorLogger;
 import io.github.the_infinite.framework.monitoring.ILogMonitor;
 import io.github.the_infinite.framework.utils.DataHelpers;
-
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Function;
-
-import com.rabbitmq.client.AMQP;
-
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
@@ -134,7 +133,7 @@ public class QueueConsumer<T, ResultType> {
 
             //? Add periodic tracking of progress here since we
             // need to periodically keep track of our queue statistics
-            vertx.setPeriodic(60000, id -> getStatistics()
+            vertx.setPeriodic(600000, id -> getStatistics()
               .onFailure(cause -> logger.error(context, LogEvent.create("Failed to get queue statistics", getClass().getSimpleName(), Map.of(
                 "queueName", queueName,
                 "error", cause.getMessage(),

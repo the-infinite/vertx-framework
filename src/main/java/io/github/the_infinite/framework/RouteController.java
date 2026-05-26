@@ -112,7 +112,7 @@ public abstract class RouteController {
           e.printStackTrace();
         }
       }
-      return "Failed to serialize response body: " + errorResult.getMessage();
+      return errorResult.getMessage();
     }
   }
 
@@ -178,8 +178,8 @@ public abstract class RouteController {
   static private <T> Handler<RoutingContext> wrapHandler(RouteHandler<T> handler) {
     return routingContext -> {
       final var env = AppEnvironment.getInstance();
+      final var correlationContext = CorrelationContext.from(routingContext);
       try {
-        final var correlationContext = CorrelationContext.from(routingContext);
         final var promise = Promise.<TypedServiceResult<T>>promise();
         final var future = promise.future();
 
@@ -197,13 +197,23 @@ public abstract class RouteController {
 
         //? Then call the handler so the attached listener can propagate as required.
         handler.handle(correlationContext, promise);
-      } catch (ErrorResult e) {
-        final var errorResult = ErrorResult.of(e);
-        ConsoleLogger.getInstance().error(errorResult.getMessage());
-        if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
-          errorResult.printStackTrace();
+      } catch (Exception e) {
+        ErrorResult errorResult;
+
+        if (e instanceof ErrorResult err) {
+          errorResult = err;
+        } else {
+          errorResult = ErrorResult.of(e);
         }
-        throw new RuntimeException(e);
+
+        try {
+          endAs(errorResult.toServiceResult(), correlationContext);
+        } catch (Exception ignored) {
+          ConsoleLogger.getInstance().error(errorResult.getMessage());
+          if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
+            errorResult.printStackTrace();
+          }
+        }
       }
     };
   }
@@ -239,7 +249,9 @@ public abstract class RouteController {
 
 
   @SafeVarargs
-  private <T> void mount(@NotNull String path, boolean hasBody, @NotNull HttpMethod method, @NotNull RouteDescription description, RouteHandler<T> handler, Handler<CorrelationContext>... middlewares) {
+  private <T> void mount(@NotNull String path, boolean hasBody,
+                         @NotNull HttpMethod method, @NotNull RouteDescription description, RouteHandler<
+      T> handler, Handler<CorrelationContext>... middlewares) {
     final String fullPath = calculateFullPath(path);
 
     DocumentationRegistrant.getInstance().registerRoute(fullPath, method.name(), this.getClass().getSimpleName(), description);
@@ -315,144 +327,191 @@ public abstract class RouteController {
 
 
   @SafeVarargs
-  protected final <T> void mountGet(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountGet(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                      middlewares) {
     mount(path, false, HttpMethod.GET, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountPost(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountPost(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                       middlewares) {
     mount(path, true, HttpMethod.POST, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountPut(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountPut(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                      middlewares) {
     mount(path, true, HttpMethod.PUT, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountPatch(String path, boolean hasBody, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountPatch(String path, boolean hasBody,
+                                      @NotNull RouteDescription description, RouteHandler<T> handler,
+                                      @Nullable final Handler<CorrelationContext>... middlewares) {
     mount(path, hasBody, HttpMethod.PATCH, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountDelete(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountDelete(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                         middlewares) {
     mount(path, false, HttpMethod.DELETE, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountOptions(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountOptions(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                          middlewares) {
     mount(path, false, HttpMethod.OPTIONS, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountHead(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountHead(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                       middlewares) {
     mount(path, false, HttpMethod.HEAD, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountTrace(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountTrace(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                        middlewares) {
     mount(path, false, HttpMethod.TRACE, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountConnect(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountConnect(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                          middlewares) {
     mount(path, false, HttpMethod.CONNECT, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountCopy(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountCopy(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                       middlewares) {
     mount(path, false, HttpMethod.COPY, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountMove(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountMove(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                       middlewares) {
     mount(path, false, HttpMethod.MOVE, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountLock(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountLock(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                       middlewares) {
     mount(path, true, HttpMethod.LOCK, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountUnlock(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountUnlock(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                         middlewares) {
     mount(path, false, HttpMethod.UNLOCK, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountPropfind(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountPropfind(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                           middlewares) {
     mount(path, true, HttpMethod.PROPFIND, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountMkcol(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountMkcol(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                        middlewares) {
     mount(path, false, HttpMethod.MKCOL, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountSearch(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountSearch(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                         middlewares) {
     mount(path, true, HttpMethod.SEARCH, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountReport(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountReport(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                         middlewares) {
     mount(path, true, HttpMethod.REPORT, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountCheckIn(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountCheckIn(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                          middlewares) {
     mount(path, false, HttpMethod.CHECKIN, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountCheckOut(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountCheckOut(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                           middlewares) {
     mount(path, false, HttpMethod.CHECKOUT, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountUncheckOut(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountUncheckOut(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                             middlewares) {
     mount(path, false, HttpMethod.UNCHECKOUT, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountMerge(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountMerge(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                        middlewares) {
     mount(path, true, HttpMethod.MERGE, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountAcl(String path, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountAcl(String path, @NotNull RouteDescription
+    description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>...
+                                      middlewares) {
     mount(path, true, HttpMethod.ACL, description, handler, middlewares);
   }
 
 
   @SafeVarargs
-  protected final <T> void mountCustom(String path, HttpMethod method, @NotNull RouteDescription description, RouteHandler<T> handler, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final <T> void mountCustom(String path, HttpMethod
+                                         method, @NotNull RouteDescription description, RouteHandler<T> handler,
+                                       @Nullable final Handler<CorrelationContext>... middlewares) {
     mount(path, false, method, description, handler, middlewares);
   }
 
   @SafeVarargs
-  protected final void mountStatic(String path, String fileSystemPath, @Nullable final Handler<CorrelationContext>... middlewares) {
+  protected final void mountStatic(String path, String fileSystemPath,
+                                   @Nullable final Handler<CorrelationContext>... middlewares) {
     final String fullPath;
 
     //? This is for unversioned APIs
