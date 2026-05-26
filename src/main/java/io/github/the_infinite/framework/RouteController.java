@@ -274,10 +274,10 @@ public abstract class RouteController {
         //? Okay then.
         final var builder = ValidationHandlerBuilder.create(schemaRepository);
 
-        // If expecting a raw String, enforce text/plain
+        // If expecting a raw String, enforce text/plain. We don't add strict body schemas
+        // here; Vert.x will just pass the raw buffer through safely
         if (expectedClass == String.class) {
           route.consumes("text/plain");
-          // We don't add strict body schemas here; Vert.x will just pass the raw buffer through safely
         }
 
         // If expecting a POJO, we seamlessly accept JSON, Form-Encoded, and Multipart!
