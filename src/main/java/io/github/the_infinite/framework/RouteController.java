@@ -25,8 +25,6 @@ import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.handler.StaticHandler;
 import io.vertx.ext.web.validation.builder.Bodies;
 import io.vertx.ext.web.validation.builder.ValidationHandlerBuilder;
-import io.vertx.json.schema.Draft;
-import io.vertx.json.schema.JsonSchemaOptions;
 import io.vertx.json.schema.SchemaRepository;
 import io.vertx.json.schema.common.dsl.Schemas;
 
@@ -44,14 +42,7 @@ public abstract class RouteController {
     this.basePath = noTrailingSlash(basePath);
     this.version = version;
     this.registrant = ConfigurationRegistrant.getInstance(vertx);
-
-    //? If this is not yet set up, set it up correctly.
-    this.schemaRepository = SchemaRepository.create(
-      new JsonSchemaOptions()
-        .setBaseUri(ConfigurationRegistrant.getInstance().getServerUrl())
-        .setDraft(Draft.DRAFT7)
-    );
-
+    this.schemaRepository = registrant.getSchemaRepository();
 
     //? if this registrant has not mounted error handlers yet...
     if (registrant.mountedHandlers.compareAndSet(false, true)) {
@@ -254,12 +245,8 @@ public abstract class RouteController {
     DocumentationRegistrant.getInstance().registerRoute(fullPath, method.name(), this.getClass().getSimpleName(), description);
     final var route = registrant.router.route().method(method).path(fullPath);
 
-    //? 1. If this actually has a rate limit...
-    if (description.rateLimit() != null && description.rateLimit() > 0) {
-      route.handler(wrapMiddleware(makeRateLimiterOf(description)));
-    }
 
-    //? 2. Handle Body Processing & Validation Safely
+    //? 1. Handle Body Processing & Validation Safely
     if (hasBody) {
       final Class<?> expectedClass = description.requestBodyClass();
 
@@ -294,6 +281,11 @@ public abstract class RouteController {
         // D. Build and attach the validator
         route.handler(builder.build());
       }
+    }
+
+    //? 2. If this actually has a rate limit...
+    if (description.rateLimit() != null && description.rateLimit() > 0) {
+      route.handler(wrapMiddleware(makeRateLimiterOf(description)));
     }
 
     //? 3. Mount all custom middlewares

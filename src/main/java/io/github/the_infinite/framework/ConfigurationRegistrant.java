@@ -24,6 +24,9 @@ import io.vertx.core.impl.future.PromiseImpl;
 import io.vertx.core.net.NetServer;
 import io.vertx.core.net.NetServerOptions;
 import io.vertx.ext.web.Router;
+import io.vertx.json.schema.Draft;
+import io.vertx.json.schema.JsonSchemaOptions;
+import io.vertx.json.schema.SchemaRepository;
 import lombok.Getter;
 
 @SuppressWarnings("unused")
@@ -44,6 +47,8 @@ public class ConfigurationRegistrant {
   final Vertx vertx;
   final AtomicBoolean mountedHandlers;
   private final Set<Class<? extends RouteController>> controllers = ConcurrentHashMap.newKeySet();
+  @Getter
+  private SchemaRepository schemaRepository;
   private ConsoleLogger console;
   private boolean loggedServer = false;
   private boolean loggedWorker = false;
@@ -92,6 +97,11 @@ public class ConfigurationRegistrant {
     final var instance = new ConfigurationRegistrant(vertx);
     AppEnvironment.withEnvFile(vertx, envFile);
     ConsoleLogger.initialize(vertx);
+    instance.schemaRepository = SchemaRepository.create(
+      new JsonSchemaOptions()
+        .setBaseUri(instance.getServerUrl())
+        .setDraft(Draft.DRAFT7)
+    );
     instance.console = ConsoleLogger.getInstance(vertx);
     instances.put(vertx, instance);
   }
