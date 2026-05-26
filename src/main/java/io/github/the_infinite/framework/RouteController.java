@@ -35,6 +35,7 @@ public abstract class RouteController {
   private static final Logger logger = LoggerFactory.getLogger(RouteController.class);
   static int totalCount = 0;
   private static RateLimiter limiter;
+  protected final SchemaRepository schemaRepository;
   protected final String basePath;
   protected final ConfigurationRegistrant registrant;
   private final int version;
@@ -43,6 +44,14 @@ public abstract class RouteController {
     this.basePath = noTrailingSlash(basePath);
     this.version = version;
     this.registrant = ConfigurationRegistrant.getInstance(vertx);
+
+    //? If this is not yet set up, set it up correctly.
+    this.schemaRepository = SchemaRepository.create(
+      new JsonSchemaOptions()
+        .setBaseUri(ConfigurationRegistrant.getInstance().getServerUrl())
+        .setDraft(Draft.DRAFT7)
+    );
+
 
     //? if this registrant has not mounted error handlers yet...
     if (registrant.mountedHandlers.compareAndSet(false, true)) {
@@ -261,11 +270,6 @@ public abstract class RouteController {
       if (expectedClass != Void.class) {
         // MUST mount BodyHandler first. Vert.x will not read the HTTP buffer into memory without this.
         route.handler(BodyHandler.create());
-
-        // Use Vert.x 5's SchemaRepository
-        final var schemaRepository = SchemaRepository.create(
-          new JsonSchemaOptions().setBaseUri(ConfigurationRegistrant.getInstance().getServerUrl()).setDraft(Draft.DRAFT7)
-        );
 
         //? Okay then.
         final var builder = ValidationHandlerBuilder.create(schemaRepository);
