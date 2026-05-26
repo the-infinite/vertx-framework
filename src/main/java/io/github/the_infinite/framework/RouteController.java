@@ -25,6 +25,7 @@ import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.handler.StaticHandler;
 import io.vertx.ext.web.validation.builder.Bodies;
 import io.vertx.ext.web.validation.builder.ValidationHandlerBuilder;
+import io.vertx.json.schema.Draft;
 import io.vertx.json.schema.JsonSchemaOptions;
 import io.vertx.json.schema.SchemaRepository;
 import io.vertx.json.schema.common.dsl.Schemas;
@@ -244,7 +245,12 @@ public abstract class RouteController {
     DocumentationRegistrant.getInstance().registerRoute(fullPath, method.name(), this.getClass().getSimpleName(), description);
     final var route = registrant.router.route().method(method).path(fullPath);
 
-    //? 1. Handle Body Processing & Validation Safely
+    //? 1. If this actually has a rate limit...
+    if (description.rateLimit() != null && description.rateLimit() > 0) {
+      route.handler(wrapMiddleware(makeRateLimiterOf(description)));
+    }
+
+    //? 2. Handle Body Processing & Validation Safely
     if (hasBody) {
       final Class<?> expectedClass = description.requestBodyClass();
 
@@ -258,7 +264,7 @@ public abstract class RouteController {
 
         // Use Vert.x 5's SchemaRepository
         final var schemaRepository = SchemaRepository.create(
-          new JsonSchemaOptions()
+          new JsonSchemaOptions().setBaseUri(ConfigurationRegistrant.getInstance().getServerUrl()).setDraft(Draft.DRAFT7)
         );
 
         //? Okay then.
@@ -286,11 +292,6 @@ public abstract class RouteController {
       }
     }
 
-    //? 2. If this actually has a rate limit...
-    if (description.rateLimit() != null && description.rateLimit() > 0) {
-      route.handler(wrapMiddleware(makeRateLimiterOf(description)));
-    }
-
     //? 3. Mount all custom middlewares
     if (middlewares != null) {
       for (final var middleware : middlewares) {
@@ -300,7 +301,7 @@ public abstract class RouteController {
     }
 
     //? 4. Mount the actual business logic handler
-    route.last().handler(wrapHandler(handler));
+    route.handler(wrapHandler(handler));
 
     //? 5. Now, mount and log it.
     registrant.vertx.executeBlocking(() -> {
