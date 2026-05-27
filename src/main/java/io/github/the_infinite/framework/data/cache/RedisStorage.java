@@ -97,8 +97,21 @@ public final class RedisStorage {
     return mapResponse(api.incr(key), Response::toLong, 0L);
   }
 
+  public Future<Long> incrementValue(String key, int delta) {
+    return mapResponse(api.incrby(key, Integer.toString(delta)), Response::toLong, 0L);
+  }
+
   public Future<Long> decrementValue(String key) {
     return mapResponse(api.decr(key), Response::toLong, 0L);
+  }
+
+  public Future<Long> decrementValue(String key, int delta) {
+    return mapResponse(api.decrby(key, Integer.toString(delta)), Response::toLong, 0L);
+  }
+
+
+  public Future<Long> idleTime(String key) {
+    return mapResponse(api.object(List.of("IDLETIME", key)), Response::toLong, 0L);
   }
 
   public Future<Boolean> setExpiration(String key, long seconds) {
