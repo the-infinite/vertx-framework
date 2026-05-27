@@ -150,6 +150,31 @@ public final class RedisStorage {
     return mapResponse(api.hdel(List.of(key, field)), Response::toLong, 0L);
   }
 
+  public Future<Void> setHashValues(String key, Map<String, String> fieldValues) {
+    if (fieldValues == null || fieldValues.isEmpty()) return Future.succeededFuture();
+    final var args = new ArrayList<String>();
+    args.add(key);
+    fieldValues.forEach((f, v) -> {
+      args.add(f);
+      args.add(v);
+    });
+    return mapEmpty(api.hset(args));
+  }
+
+  public Future<Boolean> setHashValueIfAbsent(String key, String field, String value) {
+    return mapResponse(api.hsetnx(key, field, value), response -> response.toLong() == 1L, false);
+  }
+
+  public Future<Long> incrementHashField(String key, String field, int value) {
+    return mapResponse(api.hincrby(key, field, Integer.toString(value)),
+      Response::toLong,
+      0L);
+  }
+
+  public Future<Long> decrementHashField(String key, String field, int value) {
+    return incrementHashField(key, field, -value);
+  }
+
   public Future<Map<String, String>> getAllHashFields(String key) {
     return mapResponse(api.hgetall(key), response -> {
       final var map = new HashMap<String, String>();
