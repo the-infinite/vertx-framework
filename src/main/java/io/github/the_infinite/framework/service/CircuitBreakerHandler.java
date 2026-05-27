@@ -6,4 +6,8 @@ import io.vertx.core.Future;
 
 public interface CircuitBreakerHandler<ReturnType, T extends ServiceProvider> extends Predicate<Future<ReturnType>> {
   Future<ReturnType> run(T provider);
+
+  default boolean test(Future<ReturnType> result) {
+    return result.failed();
+  }
 }

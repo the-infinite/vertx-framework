@@ -7,7 +7,7 @@
 
   <groupId>io.github.the-infinite</groupId>
   <artifactId>framework</artifactId>
-  <version>1.0.6</version>
+  <version>1.0.7</version>
   <packaging>jar</packaging>
 
   <name>Vert.x-based Framework</name>

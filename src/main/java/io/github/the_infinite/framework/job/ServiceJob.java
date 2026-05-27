@@ -12,6 +12,7 @@ import io.github.the_infinite.framework.response.ServiceResult;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
+import lombok.Getter;
 
 /**
  * Base type for background jobs managed by {@link JobRegistry}.
@@ -23,7 +24,16 @@ import io.vertx.core.json.JsonObject;
 public abstract class ServiceJob<T> {
   protected final MonitorLogger logger;
   final JobType myType;
+  /**
+   *  Returns whether the first execution should be deferred until the next scheduled trigger.
+   */
+  @Getter
   final boolean deferred;
+  /**
+   *  Returns the fixed schedule period in milliseconds for periodic jobs, or
+   *  for exact-time jobs.
+   */
+  @Getter
   final int period;
   final TimeOfDay schedule;
   private final boolean logCritical;
@@ -38,7 +48,7 @@ public abstract class ServiceJob<T> {
   private int failedRuns;
   private int successfulRuns;
 
-  protected ServiceJob(Vertx vertx, ILogMonitor monitor, int period, boolean deferred, boolean logCritical) {
+  private ServiceJob(Vertx vertx, ILogMonitor monitor, int period, boolean deferred, boolean logCritical) {
     if (period <= 0) {
       throw new IllegalArgumentException("period must be greater than 0");
     }
@@ -63,8 +73,7 @@ public abstract class ServiceJob<T> {
     this(vertx, monitor, period, false);
   }
 
-  protected ServiceJob(Vertx vertx, ILogMonitor monitor, TimeOfDay schedule,
-                       boolean deferred, boolean logCritical) {
+  private ServiceJob(Vertx vertx, ILogMonitor monitor, TimeOfDay schedule, boolean deferred, boolean logCritical) {
     this.schedule = Objects.requireNonNull(schedule, "schedule cannot be null");
     this.period = 0;
     this.deferred = deferred;
@@ -125,20 +134,6 @@ public abstract class ServiceJob<T> {
    */
   public JobType getType() {
     return myType;
-  }
-
-  /**
-   * Returns whether the first execution should be deferred until the next scheduled trigger.
-   */
-  public boolean isDeferred() {
-    return deferred;
-  }
-
-  /**
-   * Returns the fixed schedule period in milliseconds for periodic jobs, or {@code 0} for exact-time jobs.
-   */
-  public int getPeriod() {
-    return period;
   }
 
   /**
@@ -251,8 +246,8 @@ public abstract class ServiceJob<T> {
    * Immutable time-of-day representation for exact-time jobs.
    */
   @SuppressWarnings("NullableProblems")
-  protected record TimeOfDay(@NotNull int hour, @NotNull int minute,
-                             @NotNull int second) {
+  public record TimeOfDay(@NotNull int hour, @NotNull int minute,
+                          @NotNull int second) {
     public TimeOfDay {
       if (hour < 0 || hour > 23) {
         throw new IllegalArgumentException("hour must be between 0 and 23");
