@@ -63,7 +63,7 @@ public final class GatewayConnect {
       }
 
       final Promise<BasiliskClient> retryPromise = Promise.promise();
-      vertx.setTimer(RETRY_DELAY_MS, timerId ->
+      vertx.setTimer(RETRY_DELAY_MS, ignored ->
         connectWithRetry(vertx, config, attempt + 1).onComplete(retryPromise)
       );
       return retryPromise.future();

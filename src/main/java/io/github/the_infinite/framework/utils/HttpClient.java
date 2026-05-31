@@ -40,7 +40,7 @@ public class HttpClient {
     //? If this is not
     var usedHeaders = baseHeaders.copy();
 
-    //? If this is not null, and has some data...
+    //? If this is not null and has some data...
     if (headers != null && !headers.isEmpty()) {
       usedHeaders.addAll(headers);
     }

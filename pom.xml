@@ -301,7 +301,7 @@
               <goal>compile</goal>
             </goals>
             <configuration>
-              <release>21</release>
+              <release>26</release>
             </configuration>
           </execution>
           <execution>
@@ -311,7 +311,7 @@
               <goal>testCompile</goal>
             </goals>
             <configuration>
-              <release>21</release>
+              <release>26</release>
             </configuration>
           </execution>
         </executions>
