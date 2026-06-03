@@ -60,6 +60,7 @@
     <vertx.version>5.0.6</vertx.version>
     <jackson.version>2.19.4</jackson.version>
     <junit-jupiter.version>5.9.1</junit-jupiter.version>
+    <lombok.version>1.18.42</lombok.version>
   </properties>
 
   <dependencyManagement>
@@ -263,7 +264,7 @@
     <dependency>
       <groupId>org.projectlombok</groupId>
       <artifactId>lombok</artifactId>
-      <version>1.18.42</version>
+      <version>${lombok.version}</version>
       <scope>provided</scope>
     </dependency>
   </dependencies>
@@ -293,6 +294,16 @@
       <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>${maven-compiler-plugin.version}</version>
+        <configuration>
+          <release>26</release>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
         <executions>
           <execution>
             <id>default-compile</id>
@@ -300,9 +311,6 @@
             <goals>
               <goal>compile</goal>
             </goals>
-            <configuration>
-              <release>26</release>
-            </configuration>
           </execution>
           <execution>
             <id>default-testCompile</id>
@@ -310,9 +318,6 @@
             <goals>
               <goal>testCompile</goal>
             </goals>
-            <configuration>
-              <release>26</release>
-            </configuration>
           </execution>
         </executions>
       </plugin>
