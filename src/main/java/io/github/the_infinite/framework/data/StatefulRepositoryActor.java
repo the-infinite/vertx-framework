@@ -35,7 +35,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
       return Future.failedFuture(new IllegalStateException("Cannot create a session for a null context"));
     }
 
-    context.runOnContext(v -> {
+    context.runOnContext(ignored -> {
       if (transaction != null) {
         wrap(handler.handle(transaction, context)).onSuccess(promise::succeed).onFailure(promise::fail);
       }

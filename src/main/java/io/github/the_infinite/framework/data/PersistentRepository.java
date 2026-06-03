@@ -99,6 +99,24 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
   }
 
   /**
+   * Retrieves the name of the table associated with the model type if the model type
+   * is annotated with the {@code Table} annotation. If the {@code Table} annotation
+   * is not present on the model type, an empty {@code Optional} is returned.
+   *
+   * @return an {@code Optional} containing the name of the table if the {@code Table}
+   *         annotation is present; otherwise, an empty {@code Optional}.
+   */
+  public Optional<String> tableName() {
+    if (!modelType.isAnnotationPresent(Table.class)) {
+      return Optional.empty();
+    }
+
+    final var tableAnnotation = modelType.getAnnotation(Table.class);
+    final var tableName = tableAnnotation.name();
+    return Optional.of(tableName);
+  }
+
+  /**
    * A utility function used to check if a database table exists. It is worth noting that although this function is
    * exposed, there are not a lot of use cases I can think of for it. It is primarily used for testing and debugging
    * purposes to ensure that the database schema is correctly set up before performing operations that depend on the
@@ -107,12 +125,11 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * notion by the migration pipeline.
    */
   public Future<Boolean> doesTableExist() {
-    if (!modelType.isAnnotationPresent(Table.class)) {
+    final var tableData = tableName();
+    if(tableData.isEmpty()) {
       return Future.succeededFuture(false);
     }
-
-    final var tableAnnotation = modelType.getAnnotation(Table.class);
-    final var tableName = tableAnnotation.name();
+    final var tableName = tableData.get();
     final var console = ConsoleLogger.getInstance();
     console.debug("Checking if table '%s' exists for model '%s'".formatted(tableName, modelType.getName()));
     final var sqlQuery = "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = :tableName";
