@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import io.github.the_infinite.framework.data.cache.CachingStrategy;
 import io.github.the_infinite.framework.data.cache.InMemoryRegionFactory;
 import io.github.the_infinite.framework.data.cache.RedisRegionFactory;
+import io.github.the_infinite.framework.data.seed.SeederEntry;
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.response.ErrorResult;
@@ -261,10 +262,12 @@ public final class DatabaseFactory {
 
       //? 3. Add support for managing migrations at this point.
       metadataSources.addAnnotatedClass(MigrationEntry.class);
+      metadataSources.addAnnotatedClass(SeederEntry.class);
 
       //? 4. Build Metadata and SessionFactory
       final var sessionFactory = metadataSources.buildMetadata().buildSessionFactory();
       final var mutinyFactory = sessionFactory.unwrap(Mutiny.SessionFactory.class);
+      PersistentRepository.initialize(SeederEntry.Modules.SYSTEM, SeederEntry.class, mutinyFactory);
 
       //? Put this in.
       sessionFactories.put(options.unitName, mutinyFactory);
