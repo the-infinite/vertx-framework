@@ -299,17 +299,17 @@ public abstract class RouteController {
       }
     }
 
-    //? 2. If this actually has a rate limit...
-    if (description.rateLimit() != null && description.rateLimit() > 0) {
-      route.handler(wrapMiddleware(makeRateLimiterOf(description)));
-    }
-
-    //? 3. Mount all custom middlewares
+    //? 2. Mount all custom middlewares
     if (middlewares != null) {
       for (final var middleware : middlewares) {
         if (middleware == null) continue;
         route.handler(wrapMiddleware(middleware));
       }
+    }
+
+    //? 3. If this actually has a rate limit...
+    if (description.rateLimit() != null && description.rateLimit() > 0) {
+      route.handler(wrapMiddleware(makeRateLimiterOf(description)));
     }
 
     //? 4. Mount the actual business logic handler
