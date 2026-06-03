@@ -6,6 +6,8 @@ import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.security.SecureRandom;
+
 import io.github.the_infinite.framework.doc.DocumentationRegistrant;
 import io.github.the_infinite.framework.doc.RouteDescription;
 import io.github.the_infinite.framework.env.AppEnvironment;
@@ -30,6 +32,7 @@ import io.vertx.json.schema.common.dsl.Schemas;
 
 @SuppressWarnings({"unused", "CallToPrintStackTrace"})
 public abstract class RouteController {
+  public static final String REQUEST_ID = "App.RequestID";
   private static final Logger logger = LoggerFactory.getLogger(RouteController.class);
   static int totalCount = 0;
   private static RateLimiter limiter;
@@ -130,7 +133,7 @@ public abstract class RouteController {
     response.setStatusCode(result.getCode());
 
     //? Add the request ID.
-    response.putHeader("X-Request-ID", context.correlationId());
+    response.putHeader("X-Correlation-ID", context.correlationId());
 
     //? If this is a JSON object.
     if (resultBody == null) {
@@ -179,6 +182,7 @@ public abstract class RouteController {
     return routingContext -> {
       final var env = AppEnvironment.getInstance();
       final var correlationContext = CorrelationContext.from(routingContext);
+      correlationContext.set(REQUEST_ID, new String(new SecureRandom().generateSeed(Long.SIZE)));
       try {
         final var promise = Promise.<TypedServiceResult<T>>promise();
         final var future = promise.future();

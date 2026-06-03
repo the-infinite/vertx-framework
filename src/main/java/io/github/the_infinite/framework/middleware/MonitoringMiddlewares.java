@@ -1,18 +1,17 @@
 package io.github.the_infinite.framework.middleware;
 
-import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
-import io.github.the_infinite.framework.logging.monitor.LogEvent;
-import io.github.the_infinite.framework.utils.DataHelpers;
-
+import java.security.SecureRandom;
 import java.util.Map;
 import java.util.function.Function;
 
+import io.github.the_infinite.framework.RouteController;
+import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
+import io.github.the_infinite.framework.logging.monitor.LogEvent;
+import io.github.the_infinite.framework.utils.DataHelpers;
 import io.vertx.core.Handler;
 
 @SuppressWarnings("unused")
 public final class MonitoringMiddlewares {
-  private static final String REQUEST_ID = "App.RequestID";
-
   public static Handler<CorrelationContext> requestLogger(Function<LogEvent<String>, Void> monitor) {
     return ctx -> {
       final var startTime = System.currentTimeMillis();
@@ -21,7 +20,7 @@ public final class MonitoringMiddlewares {
         final var endTime = System.currentTimeMillis();
         monitor.apply(LogEvent.create(
           "Request context is not available.",
-          REQUEST_ID,
+          RouteController.REQUEST_ID,
           "unknown",
           Map.of(
             "requestId", "unknown",
@@ -48,15 +47,13 @@ public final class MonitoringMiddlewares {
       }
 
       //? If this request doesn't have a request ID, generate one and store it in the context...
-      if (ctx.get(REQUEST_ID) == null) {
-        final var requestId = DataHelpers.createToken(System.currentTimeMillis(),
-          Long.SIZE, 16, "", false);
-
-        ctx.set(REQUEST_ID, requestId);
+      if (ctx.get(RouteController. REQUEST_ID) == null) {
+        final var requestId = new String(new SecureRandom().generateSeed(Long.SIZE));
+        ctx.set(RouteController. REQUEST_ID, requestId);
       }
 
       //? Get the response.
-      final var requestId = ctx.<String>get(REQUEST_ID);
+      final var requestId = ctx.<String>get(RouteController. REQUEST_ID);
       final var response = ctx.router().response();
 
       //? Now, write this request ID to the response...
@@ -70,7 +67,7 @@ public final class MonitoringMiddlewares {
         final var endTime = System.currentTimeMillis();
         monitor.apply(LogEvent.create(
           "Incoming request from client",
-          REQUEST_ID,
+           RouteController.REQUEST_ID,
           requestId,
           Map.of(
             "requestId", requestId,
