@@ -2,12 +2,6 @@ package io.github.the_infinite.framework.data;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 
-import io.github.the_infinite.framework.ConfigurationRegistrant;
-import io.github.the_infinite.framework.data.types.ChangeResultModel;
-import io.github.the_infinite.framework.data.types.PaginatedResult;
-import io.github.the_infinite.framework.data.types.RepositoryOptions;
-import io.github.the_infinite.framework.utils.AtomHolder;
-
 import org.hibernate.reactive.mutiny.Mutiny;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -15,6 +9,11 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 import java.util.function.Function;
 
+import io.github.the_infinite.framework.ConfigurationRegistrant;
+import io.github.the_infinite.framework.data.types.ChangeResultModel;
+import io.github.the_infinite.framework.data.types.PaginatedResult;
+import io.github.the_infinite.framework.data.types.RepositoryOptions;
+import io.github.the_infinite.framework.utils.AtomHolder;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
@@ -275,8 +274,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
 
     //? Now, run a query with that session.
     return this.getOrCreateTransaction(transaction,
-      (session, context) -> session.get(modelType, id,
-        LockModeType.OPTIMISTIC_FORCE_INCREMENT).chain(data -> {
+      (session, context) -> session.get(modelType, id).chain(data -> {
         if (data == null) {
           return Uni.createFrom().item(Optional.empty());
         }
@@ -324,7 +322,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
   @Override
   public Future<Optional<TModel>> deleteById(long id, @Nullable Mutiny.StatelessSession transaction) {
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> session.get(modelType, id, LockModeType.OPTIMISTIC_FORCE_INCREMENT).chain(data -> {
+    return this.getOrCreateTransaction(transaction, (session, context) -> session.get(modelType, id).chain(data -> {
       if (data == null) {
         return Uni.createFrom().item(Optional.empty());
       }

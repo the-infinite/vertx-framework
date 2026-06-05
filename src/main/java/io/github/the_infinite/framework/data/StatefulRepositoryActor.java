@@ -267,7 +267,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     }
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> session.find(modelType, id, LockModeType.OPTIMISTIC_FORCE_INCREMENT).chain(data -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> session.find(modelType, id).chain(data -> {
       if (data == null) {
         return Uni.createFrom().item(Optional.empty());
       }
@@ -303,7 +303,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedCursor = options == null ? null : options.getCursor();
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.startDelete().where()), usedCursor);
 
       //? Moving forward...
@@ -314,7 +314,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   @Override
   public Future<Optional<TModel>> deleteById(long id, @Nullable Mutiny.Session transaction) {
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> session.find(modelType, id, LockModeType.OPTIMISTIC_FORCE_INCREMENT).chain(data -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> session.find(modelType, id).chain(data -> {
       if (data == null) {
         return Uni.createFrom().item(Optional.empty());
       }
