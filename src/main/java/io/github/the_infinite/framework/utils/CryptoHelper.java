@@ -4,6 +4,7 @@ import java.security.*;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
 
 import javax.crypto.*;
 import javax.crypto.spec.GCMParameterSpec;
@@ -53,7 +54,7 @@ public final class CryptoHelper {
     final var cipher = Cipher.getInstance(algorithm);
     cipher.init(Cipher.ENCRYPT_MODE, key, iv);
     final var cipherText = cipher.doFinal(input.getBytes());
-    return DataHelpers.toBase64(new String(cipherText));
+    return Base64.getEncoder().encodeToString(cipherText);
   }
 
   public static String encryptAes(String data, SecretKey key, GCMParameterSpec iv) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, BadPaddingException, IllegalBlockSizeException {
@@ -79,7 +80,7 @@ public final class CryptoHelper {
   public static String decryptAes(String algorithm, String cipherText, SecretKey key, GCMParameterSpec iv) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, BadPaddingException, IllegalBlockSizeException {
     Cipher cipher = Cipher.getInstance(algorithm);
     cipher.init(Cipher.DECRYPT_MODE, key, iv);
-    byte[] plainText = cipher.doFinal(DataHelpers.fromBase64(cipherText).getBytes());
+    byte[] plainText = cipher.doFinal(Base64.getDecoder().decode(cipherText));
     return new String(plainText);
   }
 
@@ -94,11 +95,43 @@ public final class CryptoHelper {
     return keyPairGenerator.generateKeyPair();
   }
 
+  public static String exportPublicKey(PublicKey key) {
+    final var encoded = Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getEncoded());
+    return "-----BEGIN PUBLIC KEY-----\n" + encoded + "\n-----END PUBLIC KEY-----";
+  }
+
+  public static String exportPrivateKey(PrivateKey key) {
+    final var encoded = Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getEncoded());
+    return "-----BEGIN PRIVATE KEY-----\n" + encoded + "\n-----END PRIVATE KEY-----";
+  }
+
+  public static PublicKey parsePublicKey(String pemOrBase64) throws NoSuchAlgorithmException, InvalidKeySpecException {
+    final var clean = pemOrBase64
+      .replace("-----BEGIN PUBLIC KEY-----", "")
+      .replace("-----END PUBLIC KEY-----", "")
+      .replaceAll("\\s", "");
+    final var keyBytes = Base64.getDecoder().decode(clean);
+    return KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(keyBytes));
+  }
+
+  public static PrivateKey parsePrivateKey(String pemOrBase64) throws NoSuchAlgorithmException, InvalidKeySpecException {
+    final var clean = pemOrBase64
+      .replace("-----BEGIN PRIVATE KEY-----", "")
+      .replace("-----END PRIVATE KEY-----", "")
+      .replaceAll("\\s", "");
+    final var keyBytes = Base64.getDecoder().decode(clean);
+    return KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(keyBytes));
+  }
+
   public static KeyPair parseRSAKeys(byte[] publicKeyBytes, byte[] privateKeyBytes) throws Exception {
     final var keyFactory = KeyFactory.getInstance("RSA");
     final var publicKey = keyFactory.generatePublic(new X509EncodedKeySpec(publicKeyBytes));
     final var privateKey = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(privateKeyBytes));
     return new KeyPair(publicKey, privateKey);
+  }
+
+  public static KeyPair parseRSAKeys(String publicKeyPemOrBase64, String privateKeyPemOrBase64) throws NoSuchAlgorithmException, InvalidKeySpecException {
+    return new KeyPair(parsePublicKey(publicKeyPemOrBase64), parsePrivateKey(privateKeyPemOrBase64));
   }
 
   public static byte[] encrypt(String data, PublicKey key) throws Exception {
@@ -107,9 +140,9 @@ public final class CryptoHelper {
     return cipher.doFinal(data.getBytes());
   }
 
-  public static byte[] decrypt(String data, PrivateKey key) throws Exception {
+  public static byte[] decrypt(byte[] data, PrivateKey key) throws Exception {
     Cipher cipher = Cipher.getInstance("RSA");
     cipher.init(Cipher.DECRYPT_MODE, key);
-    return cipher.doFinal(data.getBytes());
+    return cipher.doFinal(data);
   }
 }
