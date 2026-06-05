@@ -13,11 +13,9 @@ import io.vertx.core.http.RequestOptions;
 @SuppressWarnings("unused")
 public class HttpClient {
   private final io.vertx.core.http.HttpClient client;
-  private final String baseUrl;
   private final MultiMap baseHeaders = MultiMap.caseInsensitiveMultiMap();
 
-  public HttpClient(String baseUrl, Vertx vertx, Map<String, String> headers) {
-    this.baseUrl = baseUrl;
+  public HttpClient(Vertx vertx, Map<String, String> headers) {
     this.client = vertx.createHttpClient();
     this.baseHeaders.addAll(headers);
   }
@@ -49,7 +47,7 @@ public class HttpClient {
       .setMethod(method)
       .setHeaders(usedHeaders)
       .setFollowRedirects(true)
-      .setURI(noTrailingSlash("%s%s".formatted(baseUrl, path)))
+      .setAbsoluteURI(path)
     ).compose(request -> {
       if (body != null) {
         return request.send(body);
