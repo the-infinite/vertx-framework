@@ -273,6 +273,22 @@ public class DocumentationController extends RouteController {
           html.append("</ul>");
         }
 
+        if (route.description().fileParameters() != null && !route.description().fileParameters().isEmpty()) {
+          html.append("<h4>File Parameters</h4><ul>");
+          route.description().fileParameters().forEach((k, v) -> {
+            html.append("<li><code>").append(k).append("</code>: ")
+              .append(v.description())
+              .append(" (Type: <code>").append(v.type().name()).append("</code>, Extensions: <code>")
+              .append(v.type().allowedExtensionsExample())
+              .append("</code>");
+            if (v.limit() != null) {
+              html.append(", Max files: <code>").append(v.limit()).append("</code>");
+            }
+            html.append(")</li>");
+          });
+          html.append("</ul>");
+        }
+
         if (route.description().requestBodyClass() != null) {
           appendExampleDisplay(html, route.description().requestBodyClass());
         }
@@ -310,6 +326,29 @@ public class DocumentationController extends RouteController {
             String defaultValue = route.description().queryParameterDefaults() != null ? route.description().queryParameterDefaults().getOrDefault(entry.getKey(), "") : "";
             html.append("<label style='display:block; font-size:0.8rem; margin-bottom:0.2rem;'>").append(entry.getKey()).append(" (").append(entry.getValue()).append("):</label>");
             html.append("<input type='text' class='test-input query-param-").append(routeId).append("' data-param='").append(entry.getKey()).append("' value='").append(defaultValue).append("'>");
+          }
+        }
+
+        if (route.description().fileParameters() != null && !route.description().fileParameters().isEmpty()) {
+          html.append("<h4>Files</h4>");
+          for (Map.Entry<String, RouteDescription.FileParameter> entry : route.description().fileParameters().entrySet()) {
+            RouteDescription.FileParameter fileParameter = entry.getValue();
+            Integer maxFiles = fileParameter.limit() != null ? fileParameter.limit() : 1;
+            boolean isMultiple = maxFiles > 1;
+            String acceptedExtensions = fileParameter.type().allowedExtensionsExample();
+            boolean hasExplicitAccept = acceptedExtensions.contains(".");
+            html.append("<label style='display:block; font-size:0.8rem; margin-bottom:0.2rem;'>")
+              .append(fileParameter.name())
+              .append(" (").append(fileParameter.description()).append(")")
+              .append(" - ").append(fileParameter.type().name())
+              .append(" [").append(acceptedExtensions).append("]")
+              .append("</label>");
+            html.append("<input type='file' class='test-input file-input-").append(routeId)
+              .append("' data-param='").append(fileParameter.name())
+              .append("' data-limit='").append(maxFiles).append("'")
+              .append(hasExplicitAccept ? " accept='" + acceptedExtensions + "'" : "")
+              .append(isMultiple ? " multiple" : "")
+              .append(">");
           }
         }
 
@@ -362,6 +401,10 @@ public class DocumentationController extends RouteController {
       function normalizeBody(body) {
         if (body == null) {
           return '';
+        }
+
+        if (typeof FormData !== 'undefined' && body instanceof FormData) {
+          return body;
         }
 
         if (typeof body === 'string') {
@@ -443,9 +486,13 @@ public class DocumentationController extends RouteController {
 
       function createFetchOptions(method, headers, requestBody) {
         const normalizedHeaders = { ...headers };
+        const isFormData = typeof FormData !== 'undefined' && requestBody instanceof FormData;
         const hasBody = requestBody != null && requestBody !== '';
 
-        if (hasBody && method !== 'GET' && method !== 'DELETE' && !normalizedHeaders['Content-Type']) {
+        if (isFormData) {
+          // Let the browser inject multipart boundaries.
+          delete normalizedHeaders['Content-Type'];
+        } else if (hasBody && method !== 'GET' && method !== 'DELETE' && !normalizedHeaders['Content-Type']) {
           normalizedHeaders['Content-Type'] = 'application/json';
         }
 
@@ -603,6 +650,25 @@ public class DocumentationController extends RouteController {
             requestBody = requestBody.split('{{' + key + '}}').join(params[key]);
             requestBody = requestBody.split(':' + key).join(params[key]);
           }
+        }
+
+        const fileInputs = document.querySelectorAll('.file-input-' + routeId);
+        if (fileInputs.length > 0) {
+          const formData = new FormData();
+          fileInputs.forEach(input => {
+            const files = input.files ? Array.from(input.files) : [];
+            if (files.length === 0) {
+              return;
+            }
+
+            const limit = Number.parseInt(input.dataset.limit || '1', 10);
+            if (!Number.isNaN(limit) && limit > 0 && files.length > limit) {
+              throw new Error('File parameter "' + input.dataset.param + '" allows at most ' + limit + ' file(s).');
+            }
+
+            files.forEach(file => formData.append(input.dataset.param, file));
+          });
+          requestBody = formData;
         }
 
         const resultDiv = document.getElementById('result-' + routeId);

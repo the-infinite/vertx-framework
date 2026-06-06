@@ -25,6 +25,7 @@ public record RouteDescription(String name, String description,
                                @Nullable Map<String, String> pathParameterDefaults,
                                @Nullable Map<String, String> queryParameters,
                                @Nullable Map<String, String> queryParameterDefaults,
+                               @Nullable Map<String, FileParameter> fileParameters,
                                @Nullable Integer rateLimit,
                                boolean authenticationRequired,
                                @Nullable String authenticationComment) {
@@ -71,7 +72,7 @@ public record RouteDescription(String name, String description,
                           @Nullable Integer rateLimit,
                           boolean authenticationRequired,
                           @Nullable String authenticationComment) {
-    this(name, description, requestBodyClass, responseDTOs, headers, pathParameters, null, queryParameters, null, rateLimit, authenticationRequired, authenticationComment);
+    this(name, description, requestBodyClass, responseDTOs, headers, pathParameters, null, queryParameters, null, null, rateLimit, authenticationRequired, authenticationComment);
   }
 
   /**
@@ -102,11 +103,53 @@ public record RouteDescription(String name, String description,
     return Collections.unmodifiableMap(completeHeaders);
   }
 
+  @Override
+  public Map<String, FileParameter> fileParameters() {
+    if (this.fileParameters == null || this.fileParameters.isEmpty()) {
+      return Collections.emptyMap();
+    }
+
+    return Collections.unmodifiableMap(this.fileParameters);
+  }
+
+  /**
+   * Categorizes file uploads and document extension examples accepted by the endpoint.
+   */
+  public enum FileParameterType {
+    IMAGE(".png, .jpg, .jpeg, .gif, .webp"),
+    DOCUMENT(".pdf, .doc, .docx, .txt"),
+    SPREADSHEET(".xls, .xlsx, .csv"),
+    VIDEO(".mp4, .mov, .avi"),
+    AUDIO(".mp3, .wav, .aac"),
+    ARCHIVE(".zip, .tar, .gz"),
+    ANY("Any extension");
+
+    private final String allowedExtensionsExample;
+
+    FileParameterType(String allowedExtensionsExample) {
+      this.allowedExtensionsExample = allowedExtensionsExample;
+    }
+
+    public String allowedExtensionsExample() {
+      return allowedExtensionsExample;
+    }
+  }
+
+  /**
+   * File upload metadata for documentation and test UI generation.
+   */
+  public record FileParameter(String name,
+                              String description,
+                              FileParameterType type,
+                              @Nullable Integer limit) {
+  }
+
   public static class Builder {
     private final Map<String, String> pathParameters = new HashMap<>();
     private final Map<String, String> pathParameterDefaults = new HashMap<>();
     private final Map<String, String> queryParameters = new HashMap<>();
     private final Map<String, String> queryParameterDefaults = new HashMap<>();
+    private final Map<String, FileParameter> fileParameters = new HashMap<>();
     private String name;
     private String description;
     private Class<?> requestBodyClass;
@@ -214,6 +257,24 @@ public record RouteDescription(String name, String description,
       return this;
     }
 
+    public Builder addFileParameter(String name,
+                                    String description,
+                                    @NotNull FileParameterType type) {
+      this.fileParameters.put(name, new FileParameter(name, description, type, null));
+      return this;
+    }
+
+    public Builder addFileParameter(String name,
+                                    String description,
+                                    @NotNull FileParameterType type,
+                                    @NotNull Integer limit) {
+      if (limit < 1) {
+        throw new IllegalArgumentException("File parameter limit must be greater than 0");
+      }
+      this.fileParameters.put(name, new FileParameter(name, description, type, limit));
+      return this;
+    }
+
     public Builder rateLimit(Integer rateLimit) {
       this.rateLimit = rateLimit;
       return this;
@@ -230,7 +291,24 @@ public record RouteDescription(String name, String description,
     }
 
     public RouteDescription build() {
-      return new RouteDescription(name, description, requestBodyClass, responseDTOs, headers, pathParameters, pathParameterDefaults, queryParameters, queryParameterDefaults, rateLimit, authenticationRequired, authenticationComment);
+      if(requestBodyClass == null && !fileParameters.isEmpty()) {
+        requestBodyClass = FileParameter.class; // Ensure requestBodyClass is set to enable file parameter documentation.
+      }
+      return new RouteDescription(
+        name,
+        description,
+        requestBodyClass,
+        responseDTOs,
+        headers,
+        pathParameters,
+        pathParameterDefaults,
+        queryParameters,
+        queryParameterDefaults,
+        fileParameters,
+        rateLimit,
+        authenticationRequired,
+        authenticationComment
+      );
     }
   }
 
