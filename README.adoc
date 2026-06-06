@@ -36,7 +36,7 @@ This module is published as a regular Java library (JAR). Add the following depe
 <dependency>
   <groupId>io.github.the-infinite</groupId>
   <artifactId>framework</artifactId>
-  <version>1.0.0-Final</version>
+  <version>{version}</version>
 </dependency>
 ----
 
@@ -60,6 +60,74 @@ public class App {
   }
 }
 ----
+== Time-based debouncer utility
+
+The `util` package includes `TimeDebouncers`, a small helper for coalescing repeated events over time.
+
+It currently provides:
+
+* trailing-edge debouncing for `Runnable`
+* leading-edge debouncing for `Runnable`
+* trailing-edge debouncing for values where only the latest value is emitted
+
+=== Example: trailing-edge debounce
+
+Use this when you want to wait until a burst of events settles before running work.
+
+[source,java]
+----
+ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+TimeDebouncers.Debouncer configReloadDebouncer = TimeDebouncers.trailing(
+        Duration.ofMillis(250),
+        scheduler,
+        this::reloadConfiguration
+);
+
+configReloadDebouncer.trigger();
+----
+
+=== Example: leading-edge debounce
+
+Use this when the first call should run immediately and the rest should be suppressed for a fixed window.
+
+[source,java]
+----
+TimeDebouncers.Debouncer healthLogDebouncer = TimeDebouncers.leading(
+        Duration.ofSeconds(5),
+        () -> log.warn("Gateway temporarily unavailable")
+);
+
+healthLogDebouncer.trigger();
+----
+
+=== Example: trailing latest-value debounce
+
+Use this when many state updates may occur in quick succession but only the most recent value matters.
+
+[source,java]
+----
+ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+TimeDebouncers.ValueDebouncer<String> statusPublisher = TimeDebouncers.trailingValue(
+        Duration.ofMillis(100),
+        scheduler,
+        latestStatus -> publishStatus(latestStatus)
+);
+
+statusPublisher.trigger("CONNECTING");
+statusPublisher.trigger("BOUND");
+----
+
+=== Notes
+
+* `trailing(...)` reschedules the task every time `trigger()` is called within the delay window
+* `leading(...)` does not schedule background work; it only suppresses repeated calls during the window
+* `trailingValue(...)` keeps only the latest submitted value for the pending execution
+* `cancelPending()` is available for trailing variants when queued work should be dropped
+* remember to shut down any dedicated `ScheduledExecutorService` you create for these helpers
+
+---
 
 If you want to run an executable application using the Vert.x launcher, add `io.vertx:vertx-launcher-application` to your application's dependencies (this module declares it as `provided` so it does not force the launcher on consumers).
 
