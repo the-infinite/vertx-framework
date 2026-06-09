@@ -32,18 +32,24 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var context = globalVertx.getOrCreateContext();
     final var promise = Promise.<T>promise();
 
+    if (transaction != null) {
+      try {
+        wrap(handler.handle(transaction, io.vertx.core.Vertx.currentContext())).onSuccess(promise::succeed).onFailure(promise::fail);
+      } catch (Throwable t) {
+        promise.fail(t);
+      }
+      return promise.future();
+    }
+
     if (context == null) {
       return Future.failedFuture(new IllegalStateException("Cannot create a session for a null context"));
     }
 
     context.runOnContext(v -> {
-      if (transaction != null) {
-        wrap(handler.handle(transaction, context)).onSuccess(promise::succeed).onFailure(promise::fail);
-      }
-
-      //? Okay then.
-      else {
+      try {
         wrap(sessionFactory.withStatelessSession((session) -> handler.handle(session, context))).onSuccess(promise::succeed).onFailure(promise::fail);
+      } catch (Throwable t) {
+        promise.fail(t);
       }
     });
 
@@ -64,23 +70,44 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
       return Future.failedFuture(new IllegalStateException("Cannot create a session for a null context"));
     }
 
-    context.runOnContext(ignored ->
-      wrap(sessionFactory.withStatelessTransaction((session, tx) -> handler.handle(session, context))).onSuccess(promise::succeed).onFailure(promise::fail));
+    context.runOnContext(ignored -> {
+      try {
+        wrap(sessionFactory.withStatelessTransaction((session, tx) -> handler.handle(session, context))).onSuccess(promise::succeed).onFailure(promise::fail);
+      } catch (Throwable t) {
+        promise.fail(t);
+      }
+    });
     return promise.future();
   }
 
   @Override
   public <ReturnType> Future<ReturnType> transaction(Function<Mutiny.StatelessSession, Future<ReturnType>> future) {
-    final var uni = sessionFactory.withStatelessTransaction((session, tx) -> Uni.createFrom().<ReturnType>emitter(em -> future.apply(session).andThen(transactionResult -> {
-      if (transactionResult.failed()) {
+    final var uni = sessionFactory.withStatelessTransaction((session, tx) -> Uni.createFrom().<ReturnType>emitter(em -> {
+      final Future<ReturnType> transactionFuture;
+      try {
+        transactionFuture = future.apply(session);
+      } catch (Throwable t) {
         tx.markForRollback();
-        em.fail(transactionResult.cause());
+        em.fail(t);
         return;
       }
 
-      //? Something about this is beautiful.
-      em.complete(transactionResult.result());
-    })));
+      transactionFuture.andThen(transactionResult -> {
+        try {
+          if (transactionResult.failed()) {
+            tx.markForRollback();
+            em.fail(transactionResult.cause());
+            return;
+          }
+
+          //? Something about this is beautiful.
+          em.complete(transactionResult.result());
+        } catch (Throwable t) {
+          tx.markForRollback();
+          em.fail(t);
+        }
+      });
+    }));
     return wrap(uni);
   }
 

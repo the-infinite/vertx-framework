@@ -1,30 +1,26 @@
 package io.github.the_infinite.framework.data;
 
-import io.github.the_infinite.framework.data.types.ChangeResultModel;
-import io.github.the_infinite.framework.data.types.PaginatedResult;
-import io.github.the_infinite.framework.data.types.RepositoryOptions;
-
-import io.vertx.core.Future;
-import io.vertx.core.json.JsonObject;
-import io.vertx.ext.mongo.MongoClient;
-import io.vertx.ext.mongo.FindOptions;
-import io.vertx.ext.mongo.BulkOperation;
-import io.vertx.ext.mongo.BulkWriteOptions;
-
-import jakarta.persistence.Table;
 import org.bson.types.ObjectId;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+
+import io.github.the_infinite.framework.data.types.ChangeResultModel;
+import io.github.the_infinite.framework.data.types.PaginatedResult;
+import io.github.the_infinite.framework.data.types.RepositoryOptions;
+import io.vertx.core.Future;
+import io.vertx.core.json.JsonObject;
+import io.vertx.ext.mongo.BulkOperation;
+import io.vertx.ext.mongo.BulkWriteOptions;
+import io.vertx.ext.mongo.FindOptions;
+import io.vertx.ext.mongo.MongoClient;
+import jakarta.persistence.Table;
+import lombok.Getter;
 
 @SuppressWarnings({"unused", "FieldCanBeLocal"})
 public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TModule extends Enum<?>> {
@@ -32,6 +28,10 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
   private static final Map<Class<?>, PersistentMongoRepository<?, ?>> instances = new ConcurrentHashMap<>();
 
   private final MongoClient mongoClient;
+  /**
+   *  Returns the specific data module that this repository originates from.
+   */
+  @Getter
   private final TModule module;
   private final Class<TModel> modelType;
   private final String collectionName;
@@ -105,13 +105,6 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
    */
   public MongoClient database() {
     return this.mongoClient;
-  }
-
-  /**
-   * Returns the specific data module that this repository originates from.
-   */
-  public TModule getModule() {
-    return this.module;
   }
 
   /**
