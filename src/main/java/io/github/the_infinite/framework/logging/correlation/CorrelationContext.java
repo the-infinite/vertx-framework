@@ -8,6 +8,8 @@ import io.github.the_infinite.framework.response.ErrorResult;
 import io.github.the_infinite.framework.utils.DataHelpers;
 import io.vertx.core.Context;
 import io.vertx.core.Promise;
+import io.vertx.core.http.HttpHeaders;
+import io.vertx.core.json.Json;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.validation.RequestParameters;
 import io.vertx.ext.web.validation.ValidationHandler;
@@ -118,12 +120,23 @@ public final class CorrelationContext {
       throw new UnsupportedOperationException("Cannot get request body because this is not a correlation group of a HTTP request");
     }
 
-    // 1. Handle Plain Text directly from the buffer
-    if (type == String.class) {
-      return type.cast(routingContext.body().asString());
-    }
-
     try {
+      // Multipart test requests encode the actual JSON payload into a single `body` form field.
+      if (isMultipartRequest()) {
+        final var formBody = getFormBodyPayload();
+        if (formBody != null && !formBody.isBlank()) {
+          if (type == String.class) {
+            return type.cast(formBody);
+          }
+          return Json.decodeValue(formBody, type);
+        }
+      }
+
+      // 1. Handle Plain Text directly from the buffer
+      if (type == String.class) {
+        return type.cast(routingContext.body().asString());
+      }
+
       final var params = params();
 
       if (params != null) {
@@ -152,6 +165,15 @@ public final class CorrelationContext {
 
       throw ErrorResult.of(cause);
     }
+  }
+
+  private boolean isMultipartRequest() {
+    final var contentType = routingContext.request().getHeader(HttpHeaders.CONTENT_TYPE);
+    return contentType != null && contentType.toLowerCase().startsWith("multipart/form-data");
+  }
+
+  private String getFormBodyPayload() {
+    return routingContext.request().formAttributes().get("body");
   }
 
   public CorrelationContext withCorrelationId(String id) {

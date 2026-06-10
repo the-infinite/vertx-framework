@@ -414,6 +414,23 @@ public class DocumentationController extends RouteController {
         return JSON.stringify(body);
       }
 
+      function parseJsonIfPossible(value) {
+        if (typeof value !== 'string') {
+          return value;
+        }
+
+        const trimmed = value.trim();
+        if (trimmed === '') {
+          return null;
+        }
+
+        try {
+          return JSON.parse(trimmed);
+        } catch (error) {
+          return value;
+        }
+      }
+
       function formatResponseBody(body) {
         if (body == null || body === '') {
           return '';
@@ -655,6 +672,11 @@ public class DocumentationController extends RouteController {
         const fileInputs = document.querySelectorAll('.file-input-' + routeId);
         if (fileInputs.length > 0) {
           const formData = new FormData();
+
+          // Keep body semantics stable under multipart: always send one JSON-encoded `body` field.
+          const parsedRequestBody = parseJsonIfPossible(requestBody);
+          formData.append('body', JSON.stringify(parsedRequestBody));
+
           fileInputs.forEach(input => {
             const files = input.files ? Array.from(input.files) : [];
             if (files.length === 0) {
