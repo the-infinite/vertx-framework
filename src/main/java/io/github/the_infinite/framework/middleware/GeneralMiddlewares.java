@@ -69,20 +69,17 @@ public final class GeneralMiddlewares {
   public static Handler<CorrelationContext> paginationParamsExtractor() {
     return ctx -> {
       final var request = ctx.router().request();
-      final var limitStr = request.getParam("limit");
+      final var limitStr = request.getParam("limit", "15");
       final var cursor = request.getParam("cursor");
 
-      int limit = 10;
-      if (limitStr != null) {
-        try {
-          limit = Integer.parseInt(limitStr);
-        } catch (NumberFormatException ignored) {
-        }
+      int limit = 15;
+      try {
+        limit = Integer.parseInt(limitStr);
+      } catch (NumberFormatException ignored) {
       }
 
       ctx.set(PAGINATION_LIMIT, limit);
       ctx.set(PAGINATION_CURSOR, cursor);
-
       ctx.router().next();
     };
   }

@@ -4,6 +4,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Optional;
 
+import io.github.the_infinite.framework.middleware.GeneralMiddlewares;
 import io.github.the_infinite.framework.response.ErrorResult;
 import io.github.the_infinite.framework.utils.DataHelpers;
 import io.vertx.core.Context;
@@ -209,6 +210,14 @@ public final class CorrelationContext {
     }
 
     throw new UnsupportedOperationException("Cannot set value because this correlation context does not have a valid context");
+  }
+
+  public String getPaginationCursor() {
+    return get(GeneralMiddlewares.PAGINATION_CURSOR);
+  }
+
+  public Integer getPaginationLimit() {
+    return get(GeneralMiddlewares.PAGINATION_LIMIT);
   }
 
   /// Helper function used to return a new empty promise. This does not bother with any processing; therefore, the result
