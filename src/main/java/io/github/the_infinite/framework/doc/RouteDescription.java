@@ -94,7 +94,11 @@ public record RouteDescription(String name, String description,
 
   @Override
   public Map<String, String> headers() {
-    final var completeHeaders = new HashMap<>(registrant.getGlobalHeaders());
+    final var completeHeaders = new HashMap<>(registrant.getUnauthenticatedGlobalHeaders());
+
+    if (authenticationRequired) {
+      completeHeaders.putAll(registrant.getAuthenticatedGlobalHeaders());
+    }
 
     if (this.headers != null && !this.headers.isEmpty()) {
       completeHeaders.putAll(this.headers);

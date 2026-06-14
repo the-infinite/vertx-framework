@@ -204,9 +204,15 @@ public class DocumentationController extends RouteController {
     html.append("<h2>Global Definitions</h2>");
     html.append("<p><strong>Default Rate Limit:</strong> ").append(registrant.getGlobalRateLimit() != null ? registrant.getGlobalRateLimit() + " requests" : "Unlimited").append("</p>");
 
-    if (!registrant.getGlobalHeaders().isEmpty()) {
-      html.append("<h3>Global Headers</h3><ul>");
-      registrant.getGlobalHeaders().forEach((k, v) -> html.append("<li><code>").append(k).append(": ").append(v).append("</code></li>"));
+    if (!registrant.getUnauthenticatedGlobalHeaders().isEmpty()) {
+      html.append("<h3>Global Headers for Unprotected Endpoints</h3><ul>");
+      registrant.getUnauthenticatedGlobalHeaders().forEach((k, v) -> html.append("<li><code>").append(k).append(": ").append(v).append("</code></li>"));
+      html.append("</ul>");
+    }
+
+    if (!registrant.getAuthenticatedGlobalHeaders().isEmpty()) {
+      html.append("<h3>Global Headers for Protected Endpoints</h3><ul>");
+      registrant.getAuthenticatedGlobalHeaders().forEach((k, v) -> html.append("<li><code>").append(k).append(": ").append(v).append("</code></li>"));
       html.append("</ul>");
     }
 
@@ -243,6 +249,12 @@ public class DocumentationController extends RouteController {
         } else {
           html.append("<p><strong>Authentication:</strong> Not Required (").append(route.description().authenticationComment() != null ? route.description().authenticationComment() : "Public API").append(")</p>");
         }
+
+        html.append("<p><strong>Header Order:</strong> ");
+        html.append(route.description().authenticationRequired()
+          ? "unprotected defaults → protected defaults → route-specific headers"
+          : "unprotected defaults → route-specific headers");
+        html.append("</p>");
 
         if (route.description().rateLimit() != null) {
           html.append("<p><strong>Rate Limit:</strong> ").append(route.description().rateLimit()).append(" requests per minute</p>");
@@ -767,7 +779,8 @@ public class DocumentationController extends RouteController {
       .thenComparing(DocumentationRegistrant.RegisteredRoute::method));
 
     for (DocumentationRegistrant.RegisteredRoute route : routes) {
-      grouped.computeIfAbsent(route.controllerClass(), k -> new ArrayList<>()).add(route);
+      List<DocumentationRegistrant.RegisteredRoute> controllerRoutes = grouped.computeIfAbsent(route.controllerClass(), ignored -> new ArrayList<>());
+      controllerRoutes.add(route);
     }
 
     cachedGroupedRoutes = grouped;

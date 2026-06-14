@@ -58,7 +58,7 @@ public class MigrationHelper {
         return Optional.empty();
       }
 
-      return Optional.of(new File(resource.toURI()));
+      return Optional.of(new File(resource.getFile()));
     } catch (Exception e) {
       throw new RuntimeException(e);
     }

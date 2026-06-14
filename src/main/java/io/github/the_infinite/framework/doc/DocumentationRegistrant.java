@@ -1,26 +1,31 @@
 package io.github.the_infinite.framework.doc;
 
-import io.github.the_infinite.framework.doc.impl.BurstHttpClient;
-import io.github.the_infinite.framework.doc.impl.ClassicHttpClient;
-import io.github.the_infinite.framework.doc.impl.ThrottledHttpClient;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import io.github.the_infinite.framework.doc.impl.BurstHttpClient;
+import io.github.the_infinite.framework.doc.impl.ClassicHttpClient;
+import io.github.the_infinite.framework.doc.impl.ThrottledHttpClient;
+import lombok.Getter;
+
 /**
  * Singleton class to manage global documentation settings and collect route descriptions.
  * It stores global headers, authentication settings, and the rate limit.
  */
+@SuppressWarnings("unused")
 public class DocumentationRegistrant {
     private static final DocumentationRegistrant INSTANCE = new DocumentationRegistrant();
 
-    private final Map<String, String> globalHeaders = new ConcurrentHashMap<>();
+    private final Map<String, String> legacyGlobalHeaders = new ConcurrentHashMap<>();
+    private final Map<String, String> unauthenticatedGlobalHeaders = new ConcurrentHashMap<>();
+    private final Map<String, String> authenticatedGlobalHeaders = new ConcurrentHashMap<>();
     private final Map<String, String> authSettings = new ConcurrentHashMap<>();
     private final List<RegisteredRoute> registeredRoutes = Collections.synchronizedList(new ArrayList<>());
     private final List<HttpClient> httpClients = Collections.synchronizedList(new ArrayList<>());
+    @Getter
     private Integer globalRateLimit;
 
     private DocumentationRegistrant() {
@@ -33,15 +38,39 @@ public class DocumentationRegistrant {
         return INSTANCE;
     }
 
+    @SuppressWarnings("unused")
     public void setGlobalHeaders(Map<String, String> headers) {
-        this.globalHeaders.clear();
-        this.globalHeaders.putAll(headers);
+        this.legacyGlobalHeaders.clear();
+        this.legacyGlobalHeaders.putAll(headers);
     }
 
     public Map<String, String> getGlobalHeaders() {
-        return Collections.unmodifiableMap(globalHeaders);
+        final var combined = new java.util.LinkedHashMap<>(legacyGlobalHeaders);
+        combined.putAll(unauthenticatedGlobalHeaders);
+        combined.putAll(authenticatedGlobalHeaders);
+        return Collections.unmodifiableMap(combined);
     }
 
+    @SuppressWarnings("unused")
+    public void setGlobalHeaders(Map<String, String> headers, boolean authenticatedOnly) {
+        final var target = authenticatedOnly ? authenticatedGlobalHeaders : unauthenticatedGlobalHeaders;
+        target.clear();
+        target.putAll(headers);
+    }
+
+    public Map<String, String> getAuthenticatedGlobalHeaders() {
+        final var combined = new java.util.LinkedHashMap<>(legacyGlobalHeaders);
+        combined.putAll(authenticatedGlobalHeaders);
+        return Collections.unmodifiableMap(combined);
+    }
+
+    public Map<String, String> getUnauthenticatedGlobalHeaders() {
+        final var combined = new java.util.LinkedHashMap<>(legacyGlobalHeaders);
+        combined.putAll(unauthenticatedGlobalHeaders);
+        return Collections.unmodifiableMap(combined);
+    }
+
+    @SuppressWarnings("unused")
     public void setAuthSettings(Map<String, String> settings) {
         this.authSettings.clear();
         this.authSettings.putAll(settings);
@@ -51,15 +80,12 @@ public class DocumentationRegistrant {
         return Collections.unmodifiableMap(authSettings);
     }
 
+    @SuppressWarnings("unused")
     public void setGlobalRateLimit(Integer rateLimit) {
         this.globalRateLimit = rateLimit;
     }
 
-    public Integer getGlobalRateLimit() {
-        return globalRateLimit;
-    }
-
-    public void registerHttpClient(HttpClient client) {
+  public void registerHttpClient(HttpClient client) {
         httpClients.add(client);
     }
 
