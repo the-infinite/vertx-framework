@@ -11,9 +11,14 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.zip.CRC32;
 
 import io.github.the_infinite.framework.data.types.RepositoryOptions;
@@ -58,11 +63,22 @@ public class MigrationHelper {
         return Optional.empty();
       }
 
-      return Optional.of(new File(resource.getFile()));
+      final var uri = resource.toURI();
+
+      // Check if the application is running out of a packaged JAR file
+      // In production/Docker, files are locked in the JAR. They cannot be represented as an OS File object.
+      // We log a warning and return empty, skipping local File directory scans.
+      if ("jar".equals(uri.getScheme())) {
+        return Optional.empty();
+      }
+
+      // Works perfectly for local IDE testing
+      return Optional.of(new File(uri));
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
   }
+
 
   private static Future<Void> createMigrationsTable(Vertx vertx, Mutiny.SessionFactory sessionFactory) {
     final var console = ConsoleLogger.getInstance(vertx);
@@ -377,42 +393,92 @@ public class MigrationHelper {
       final var promise = Promise.<Void>promise();
       final var console = ConsoleLogger.getInstance(vertx);
       final var migrationsRepo = new PersistentRepository<>(MigrationEntry.Modules.SYSTEM, MigrationEntry.class, sessionFactory);
-      final var outputDirBase = getRuntimeOutputPath();
+      final var classLoader = MigrationHelper.class.getClassLoader();
+      final var resource = classLoader.getResource("db/migrations");
 
-      if (outputDirBase.isEmpty()) {
-        promise.fail(new IOException("Failed to determine migration output directory from resources"));
+      if (resource == null) {
+        promise.fail(new IOException("Failed to find 'db/migrations' folder in resources"));
         return promise.future();
       }
 
-      final var outputDir = outputDirBase.get();
+      final var uri = resource.toURI();
+      final List<File> migrationFiles = new ArrayList<>();
 
-      //? Create this is it doesn't exist, otherwise the migration tool will fail when trying to write the output file.
-      if (!outputDir.exists()) {
-        //? If we could create this...
-        if (outputDir.mkdirs()) {
-          ConsoleLogger.getInstance(vertx).exec("Created migration output directory: " + outputDir.getAbsolutePath());
-        }
+      // Scenario A: Running inside a packaged JAR (Docker / Production)
+      if ("jar".equals(uri.getScheme())) {
+        // Create an isolated virtual filesystem scope to crawl the ZIP contents
+        try (FileSystem fileSystem = FileSystems.newFileSystem(uri, Collections.emptyMap())) {
+          final var migrationFolder = fileSystem.getPath("db/migrations");
+          if (Files.exists(migrationFolder)) {
+            try (Stream<Path> walkStream = Files.walk(migrationFolder, 1)) {
+              final var tempDir = new File(System.getProperty("java.io.tmpdir"), "extracted-migrations");
+              if (!tempDir.exists() && !tempDir.mkdirs()) {
+                throw new IOException("Failed to create temporary migration directory: " + tempDir.getAbsolutePath());
+              }
 
-        //? Could not do this.
-        else {
-          promise.fail(new IOException("Failed to create migration output directory: " + outputDir.getAbsolutePath()));
-          return promise.future();
+              final var pathsList = walkStream
+                .filter(Files::isRegularFile)
+                .filter(path -> path.getFileName().toString().endsWith(".sql"))
+                .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+                .toList();
+
+              for (final var path : pathsList) {
+                final var fileName = path.getFileName().toString();
+                final var tempFile = new File(tempDir, fileName);
+
+                // Copy the file out of the JAR into /tmp so executeMigrations can read it as a normal File
+                try (final var is = classLoader.getResourceAsStream("db/migrations/" + fileName)) {
+                  if (is != null) {
+                    Files.copy(is, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    migrationFiles.add(tempFile);
+                  }
+                }
+              }
+            }
+          } else {
+            console.warn("Migrations folder does not exist in JAR, skipping migration generation.");
+            return Future.succeededFuture();
+          }
         }
       }
 
-      //? Let us get the current sorted files.
-      final var migrationFiles = Arrays.stream(Objects.requireNonNull(outputDir.listFiles())).sorted(Comparator.comparing(File::getName)).toList();
+      else {
+        final var outputDir = new File(uri);
+        if (!outputDir.exists()) {
 
-      //? Okay then.
+          // If we could create this...
+          if (outputDir.mkdirs()) {
+            ConsoleLogger.getInstance(vertx).exec("Created migration output directory: " + outputDir.getAbsolutePath());
+          }
+
+          // Could not do this.
+          else {
+            promise.fail(new IOException("Failed to create migration output directory: " + outputDir.getAbsolutePath()));
+            return promise.future();
+          }
+        }
+
+        // Get the current sorted files from the local folder
+        final var localFiles = outputDir.listFiles();
+        if (localFiles != null) {
+          migrationFiles.addAll(Arrays.stream(localFiles)
+            .sorted(Comparator.comparing(File::getName))
+            .toList());
+        }
+      }
+
+      // Okay then. Proceed with your exact database matching checks
       migrationsRepo.doesTableExist().onFailure(promise::fail).onSuccess(exists -> {
-        //? If this does not exist, then we can just run the migrations without checking for applied ones, since there are none.
+        // If this does not exist, then we can just run the migrations without checking for applied ones, since there are none.
         if (!exists) {
           console.info("Migrations table does not exist, applying all migrations...");
-          createMigrationsTable(vertx, sessionFactory).onFailure(promise::fail).onSuccess(v -> executeMigrations(console, sessionFactory, migrationFiles, List.of(), promise));
+          createMigrationsTable(vertx, sessionFactory)
+            .onFailure(promise::fail)
+            .onSuccess(v -> executeMigrations(console, sessionFactory, migrationFiles, List.of(), promise));
           return;
         }
 
-        //? Since it exists, we need to check which migrations have been applied and only run the ones that have not been applied.
+        // Since it exists, we need to check which migrations have been applied and only run the ones that have not been applied.
         migrationsRepo.getMany(
             null,
             new RepositoryOptions<MigrationEntry>(CorrelationContext.from(vertx.getOrCreateContext())).setLimit(3000),
@@ -427,8 +493,8 @@ public class MigrationHelper {
       if (e.getCause() != null) {
         return Future.failedFuture(e.getCause());
       }
-
       return Future.failedFuture(e);
     }
   }
+
 }
