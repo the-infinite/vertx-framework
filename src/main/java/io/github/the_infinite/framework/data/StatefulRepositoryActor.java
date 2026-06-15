@@ -2,6 +2,7 @@ package io.github.the_infinite.framework.data;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 
+import org.hibernate.Hibernate;
 import org.hibernate.reactive.mutiny.Mutiny;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -18,6 +19,7 @@ import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.unchecked.Unchecked;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
+import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.LockModeType;
 
 public final class StatefulRepositoryActor<TModel extends BaseEntity> extends RepositoryActor<TModel, Mutiny.Session> {
@@ -70,7 +72,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
 
     context.runOnContext(ignored -> {
       try {
-        wrap(sessionFactory.withTransaction((session, tx) -> handler.handle(session, context))).onSuccess(promise::succeed).onFailure(promise::fail);
+        wrap(sessionFactory.withTransaction((session, _) -> handler.handle(session, context))).onSuccess(promise::succeed).onFailure(promise::fail);
       } catch (Throwable t) {
         promise.fail(t);
       }
@@ -113,7 +115,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   public Future<Long> getCount(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
     final var usedCursor = options == null ? null : options.getCursor();
 
-    return this.getOrCreateSession(transaction, (session, context) -> {
+    return this.getOrCreateSession(transaction, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, start()), usedCursor);
       return session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult();
     });
@@ -128,7 +130,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var countAtom = new AtomHolder<Long>();
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult().chain(count -> {
+    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult().chain(count -> {
       countAtom.set(count);
       return session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
     }).map(Unchecked.function(data -> {
@@ -154,7 +156,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList());
+    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList());
   }
 
   @Override
@@ -165,7 +167,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor).distinct();
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList());
+    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList());
   }
 
   @Override
@@ -176,12 +178,45 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getSingleResult().map(Optional::ofNullable));
+    final var q  = usedFilters.select().query();
+    return this.getOrCreateSession(transaction, (session, _) ->
+      session.createQuery(q)
+        .setMaxResults(usedLimit)
+        .getSingleResultOrNull()
+        .chain(entity -> {
+          if (entity == null) {
+            return Uni.createFrom().item(Optional.<TModel>empty());
+          }
+
+          // Initialize all associations while session is still active
+          return session.flush().map(ignored -> {
+            Hibernate.initialize(entity);
+            session.detach(entity);
+            return Optional.of(entity);
+          });
+        })
+        .onFailure(EntityNotFoundException.class).recoverWithItem(Optional.empty())
+    );
   }
 
   @Override
   public Future<Optional<TModel>> getById(long id, LockModeType lockMode, @Nullable Mutiny.Session transaction) {
-    return this.getOrCreateSession(transaction, (session, context) -> session.find(modelType, id, lockMode).map(Optional::ofNullable));
+    return this.getOrCreateSession(transaction, (session, _) ->
+      session.find(modelType, id, lockMode)
+        .chain(entity -> {
+          if (entity == null) {
+            return Uni.createFrom().item(Optional.<TModel>empty());
+          }
+
+          // Initialize all associations while session is still active
+          return session.flush().map(_ -> {
+            Hibernate.initialize(entity);
+            session.detach(entity);
+            return Optional.of(entity);
+          });
+        })
+        .onFailure(EntityNotFoundException.class).recoverWithItem(Optional.empty())
+    );
   }
 
   @Override
@@ -192,24 +227,25 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     }
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> session.persistAll(items.stream().peek(item -> {
+    return this.getOrCreateSession(transaction, (session, _) -> session.persistAll(items.stream().peek(item -> {
       item.setUid(UUID.randomUUID());
       if (item instanceof BaseAuditableEntity ae) {
         ae.setCreatedById(options.getUserId());
         ae.setUpdatedById(options.getUserId());
       }
-    }).toArray()).map(v -> items));
+    }).toArray()).map(_ -> items));
   }
 
   @Override
-  Future<Optional<TModel>> createOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+  public Future<Optional<TModel>> createOne(@NotNull TModel item,
+                                      @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
     //? If options are not clearly defined...
     if (options.getUserId() < 1 && this.modelType.getSuperclass().equals(BaseAuditableEntity.class)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating a record."));
     }
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> {
+    return this.getOrCreateSession(transaction, (session, _) -> {
       item.setUid(UUID.randomUUID());
       if (item instanceof BaseAuditableEntity ae) {
         ae.setCreatedById(options.getUserId());
@@ -217,7 +253,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
       }
 
       //? Moving forward...
-      return session.persist(item).map(v -> Optional.of(item));
+      return session.persist(item).map(_ -> Optional.of(item));
     });
   }
 
@@ -234,7 +270,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList().chain(data -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList().chain(data -> {
       final var changeList = new ArrayList<TModel>();
 
       //? Change each entity herein.
@@ -252,7 +288,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
         return Uni.createFrom().item(new ChangeResultModel<>(changeList));
       }
 
-      return session.mergeAll(changeList.toArray()).chain(v -> session.flush()).map(v -> new ChangeResultModel<>(changeList));
+      return session.mergeAll(changeList.toArray()).chain(_ -> session.flush()).map(_ -> new ChangeResultModel<>(changeList));
     }));
   }
 
@@ -269,7 +305,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     }
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getSingleResult().chain(data -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getSingleResult().chain(data -> {
       if (data == null) {
         return Uni.createFrom().item(Optional.empty());
       }
@@ -282,7 +318,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
         ae.setUpdatedById(options.getUserId());
       }
 
-      return session.merge(data).chain(v -> session.flush()).map(v -> Optional.of(data));
+      return session.merge(data).chain(_ -> session.flush()).map(_ -> Optional.of(data));
     }));
   }
 
@@ -307,7 +343,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
         ae.setUpdatedById(options.getUserId());
       }
 
-      return session.merge(data).chain(v -> session.flush()).map(v -> Optional.of(data));
+      return session.merge(data).chain(_ -> session.flush()).map(_ -> Optional.of(data));
     }));
   }
 
@@ -316,7 +352,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedCursor = options == null ? null : options.getCursor();
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.startDelete().where()), usedCursor);
 
       //? Moving forward...
@@ -346,7 +382,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
         return Uni.createFrom().item(Optional.empty());
       }
 
-      return session.remove(data).chain(v -> session.flush()).map(v -> Optional.of(data));
+      return session.remove(data).chain(_ -> session.flush()).map(_ -> Optional.of(data));
     }));
   }
 }

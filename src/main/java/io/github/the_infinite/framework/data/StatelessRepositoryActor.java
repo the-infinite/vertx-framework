@@ -15,6 +15,7 @@ import io.github.the_infinite.framework.data.types.PaginatedResult;
 import io.github.the_infinite.framework.data.types.RepositoryOptions;
 import io.github.the_infinite.framework.utils.AtomHolder;
 import io.smallrye.mutiny.Uni;
+import io.smallrye.mutiny.unchecked.Unchecked;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import jakarta.persistence.LockModeType;
@@ -45,7 +46,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
       return Future.failedFuture(new IllegalStateException("Cannot create a session for a null context"));
     }
 
-    context.runOnContext(v -> {
+    context.runOnContext(_ -> {
       try {
         wrap(sessionFactory.withStatelessSession((session) -> handler.handle(session, context))).onSuccess(promise::succeed).onFailure(promise::fail);
       } catch (Throwable t) {
@@ -72,7 +73,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
 
     context.runOnContext(ignored -> {
       try {
-        wrap(sessionFactory.withStatelessTransaction((session, tx) -> handler.handle(session, context))).onSuccess(promise::succeed).onFailure(promise::fail);
+        wrap(sessionFactory.withStatelessTransaction((session, _) -> handler.handle(session, context))).onSuccess(promise::succeed).onFailure(promise::fail);
       } catch (Throwable t) {
         promise.fail(t);
       }
@@ -115,7 +116,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
   public Future<Long> getCount(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.StatelessSession transaction) {
     final var usedCursor = options == null ? null : options.getCursor();
 
-    return this.getOrCreateSession(transaction, (session, context) -> {
+    return this.getOrCreateSession(transaction, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, start()), usedCursor);
       return session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult();
     });
@@ -130,10 +131,10 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var countAtom = new AtomHolder<Long>();
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult().chain(count -> {
+    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult().chain(count -> {
       countAtom.set(count);
       return session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
-    }).map(data -> {
+    }).map(Unchecked.function(data -> {
       String nextCursor = null;
 
       try {
@@ -145,7 +146,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
       }
 
       return new PaginatedResult<>(data, usedLimit, countAtom.get(), usedCursor, nextCursor);
-    }));
+    })));
   }
 
   @Override
@@ -156,7 +157,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList());
+    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList());
   }
 
   @Override
@@ -167,7 +168,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor).distinct();
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList());
+    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList());
   }
 
   @Override
@@ -178,13 +179,13 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getSingleResult().map(Optional::ofNullable));
+    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getSingleResult().map(Optional::ofNullable));
   }
 
   @Override
   public Future<Optional<TModel>> getById(long id, LockModeType lockMode, @Nullable Mutiny.StatelessSession transaction) {
     return this.getOrCreateSession(transaction,
-      (session, context) -> session.get(modelType, id, lockMode).map(Optional::ofNullable));
+      (session, _) -> session.get(modelType, id, lockMode).map(Optional::ofNullable));
   }
 
   @Override
@@ -198,13 +199,13 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
 
     //? Now, run a query with that session.
     return this.getOrCreateSession(transaction,
-      (session, context) -> session.insertAll(items.stream().peek(item -> {
+      (session, _) -> session.insertAll(items.stream().peek(item -> {
       item.setUid(UUID.randomUUID());
       if (item instanceof BaseAuditableEntity ae) {
         ae.setCreatedById(options.getUserId());
         ae.setUpdatedById(options.getUserId());
       }
-    }).toArray()).map(v -> items));
+    }).toArray()).map(_ -> items));
   }
 
   @Override
@@ -215,7 +216,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     }
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, context) -> {
+    return this.getOrCreateSession(transaction, (session, _) -> {
       item.setUid(UUID.randomUUID());
       if (item instanceof BaseAuditableEntity ae) {
         ae.setCreatedById(options.getUserId());
@@ -223,7 +224,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
       }
 
       //? Moving forward...
-      return session.insert(item).map(v -> Optional.of(item));
+      return session.insert(item).map(_ -> Optional.of(item));
     });
   }
 
@@ -240,7 +241,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList().chain(data -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList().chain(data -> {
       final var changeList = new ArrayList<TModel>();
 
       //? Change each entity herein.
@@ -258,7 +259,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
         return Uni.createFrom().item(new ChangeResultModel<>(changeList));
       }
 
-      return session.updateAll(changeList.toArray()).map(v -> new ChangeResultModel<>(changeList));
+      return session.updateAll(changeList.toArray()).map(_ -> new ChangeResultModel<>(changeList));
     }));
   }
 
@@ -275,7 +276,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     }
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getSingleResult().chain(data -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getSingleResult().chain(data -> {
       if (data == null) {
         return Uni.createFrom().item(Optional.empty());
       }
@@ -288,7 +289,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
         ae.setUpdatedById(options.getUserId());
       }
 
-      return session.update(data).map(v -> Optional.of(data));
+      return session.update(data).map(_ -> Optional.of(data));
     }));
   }
 
@@ -301,7 +302,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
 
     //? Now, run a query with that session.
     return this.getOrCreateTransaction(transaction,
-      (session, context) -> session.get(modelType, id).chain(data -> {
+      (session, _) -> session.get(modelType, id).chain(data -> {
         if (data == null) {
           return Uni.createFrom().item(Optional.empty());
         }
@@ -314,7 +315,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
           ae.setUpdatedById(options.getUserId());
         }
 
-        return session.update(data).map(v -> Optional.of(data));
+        return session.update(data).map(_ -> Optional.of(data));
       }));
   }
 
@@ -323,7 +324,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedCursor = options == null ? null : options.getCursor();
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.startDelete().where()), usedCursor);
 
       //? Moving forward...
@@ -338,7 +339,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedCursor = options == null ? null : options.getCursor();
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.startDelete().where()), usedCursor);
 
       //? Moving forward...
@@ -349,12 +350,12 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
   @Override
   public Future<Optional<TModel>> deleteById(long id, @Nullable Mutiny.StatelessSession transaction) {
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, context) -> session.get(modelType, id).chain(data -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> session.get(modelType, id).chain(data -> {
       if (data == null) {
         return Uni.createFrom().item(Optional.empty());
       }
 
-      return session.delete(data).map(v -> Optional.of(data));
+      return session.delete(data).map(_ -> Optional.of(data));
     }));
   }
 }
