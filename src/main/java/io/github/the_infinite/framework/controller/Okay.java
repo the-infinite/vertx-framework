@@ -13,10 +13,10 @@ public final class Okay<T> extends ServiceResult<T> {
     }
 
     public Okay(String message, T data) {
-        this("OK", message, data);
+        this("success", message, data);
     }
 
     public Okay(T data) {
-        this("OK", "Okay", data);
+        this("success", "Action completed successfully", data);
     }
 }

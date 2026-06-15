@@ -9,7 +9,6 @@ import org.jetbrains.annotations.NotNull;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
-import java.util.regex.Pattern;
 
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
@@ -22,8 +21,6 @@ import lombok.Getter;
 
 @SuppressWarnings("unused")
 public class ErrorResult extends Exception {
-  private static final Pattern ABBREVIATION_PATTERN = Pattern.compile("(\\w)[\\w]*([./])");
-
   protected final String message;
 
   @Getter
@@ -35,7 +32,7 @@ public class ErrorResult extends Exception {
   public ErrorResult(String message, Object data, int code) {
     super(message);
     final var env = AppEnvironment.getInstance();
-    this.message = ABBREVIATION_PATTERN.matcher(message).replaceAll("$1.");
+    this.message = message;
     this.code = code;
     this.data = buildData(data, code);
   }
