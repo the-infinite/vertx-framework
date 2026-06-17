@@ -119,6 +119,7 @@ public final class DatabaseFactory {
       .setReconnectInterval(5000)
       .setReconnectAttempts(10);
     config.setUri(env.getRabbitMqUrl());
+    config.setVirtualHost(env.getRabbitMqVhost());
     final var client = RabbitMQClient.create(vertx, config);
 
     //? Connect to RabbitMQ first.

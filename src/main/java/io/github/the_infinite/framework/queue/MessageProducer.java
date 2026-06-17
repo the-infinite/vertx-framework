@@ -2,17 +2,16 @@ package io.github.the_infinite.framework.queue;
 
 import com.rabbitmq.client.AMQP;
 
+import java.util.Map;
+import java.util.Objects;
+
 import io.github.the_infinite.framework.data.DatabaseFactory;
 import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
 import io.github.the_infinite.framework.logging.monitor.LogEvent;
 import io.github.the_infinite.framework.logging.monitor.MonitorLogger;
-
-import java.util.Map;
-import java.util.Objects;
-
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
-import io.vertx.core.buffer.Buffer;
+import io.vertx.core.json.JsonObject;
 import io.vertx.rabbitmq.RabbitMQClient;
 
 @SuppressWarnings("unused")
@@ -23,6 +22,7 @@ public class MessageProducer {
   private final MonitorLogger logger;
   private final long timer;
   private final Vertx vertx;
+  private final QueueManagement queueManagement;
   private AMQP.Queue.DeclareOk currentMetrics;
 
   public MessageProducer(Vertx vertx, String queueName, MonitorLogger logger) {
@@ -30,16 +30,23 @@ public class MessageProducer {
     this.logger = logger;
     this.queueName = queueName;
     this.client = DatabaseFactory.getQueueClient(vertx);
+    this.queueManagement = new QueueManagement(this.client);
     this.context = CorrelationContext.from(vertx.getOrCreateContext());
     this.timer = vertx.setPeriodic(60_000, timerId ->
-      client.queueDeclare(queueName, true, false, false)
-        .onSuccess(declareOk -> {
-          this.logger.info(context, LogEvent.create("Periodic message producer data", getClass().getName(), Map.of(
-            "consumerCount", declareOk.getConsumerCount(),
-            "messageCount", declareOk.getMessageCount(),
-            "queueName", declareOk.getQueue()
-          )));
-          this.currentMetrics = declareOk;
+      queueManagement.getQueueInfo(queueName)
+        .onSuccess(result -> {
+          // Cast result to get metrics
+          try {
+            final var declareOk = (AMQP.Queue.DeclareOk) result;
+            this.logger.info(context, LogEvent.create("Periodic message producer data", getClass().getName(), Map.of(
+              "consumerCount", declareOk.getConsumerCount(),
+              "messageCount", declareOk.getMessageCount(),
+              "queueName", declareOk.getQueue()
+            )));
+            this.currentMetrics = declareOk;
+          } catch (ClassCastException ignored) {
+            // Handle if result format changes
+          }
         }).onFailure(failure -> {
           final var usedMetrics = Objects.requireNonNullElse(currentMetrics, new AMQP.Queue.DeclareOk() {
             @Override
@@ -100,6 +107,168 @@ public class MessageProducer {
     return this.client.stop();
   }
 
+  // ==================== Queue Management Methods ====================
+
+  /**
+   * Gets the QueueManagement utility for managing queues, exchanges, and bindings.
+   * @return the QueueManagement instance
+   */
+  public QueueManagement getManager() {
+    return queueManagement;
+  }
+
+  /**
+   * Declares the default queue for this producer.
+   * @return a Future that completes when the queue is declared
+   */
+  public Future<Void> declareQueue() {
+    return queueManagement.declareQueue(queueName);
+  }
+
+  /**
+   * Declares the default queue with custom arguments.
+   * @param arguments the queue arguments (e.g., TTL, DLX)
+   * @return a Future that completes when the queue is declared
+   */
+  public Future<Void> declareQueue(JsonObject arguments) {
+    return queueManagement.declareQueue(queueName, true, false, false, arguments);
+  }
+
+  /**
+   * Declares a queue with the message TTL (time to live).
+   * @param queueName the queue name
+   * @param ttlMs the TTL in milliseconds
+   * @return a Future that completes when the queue is declared
+   */
+  public Future<Void> declareQueueWithTTL(String queueName, long ttlMs) {
+    final var args = new JsonObject().put("x-message-ttl", ttlMs);
+    return queueManagement.declareQueue(queueName, true, false, false, args);
+  }
+
+  /**
+   * Declares a queue with a dead letter exchange.
+   * @param queueName the queue name
+   * @param dlxExchange the dead letter exchange name
+   * @param dlxRoutingKey the dead letter routing key
+   * @return a Future that completes when the queue is declared
+   */
+  public Future<Void> declareQueueWithDLX(String queueName, String dlxExchange, String dlxRoutingKey) {
+    final var args = new JsonObject()
+      .put("x-dead-letter-exchange", dlxExchange)
+      .put("x-dead-letter-routing-key", dlxRoutingKey);
+    return queueManagement.declareQueue(queueName, true, false, false, args);
+  }
+
+  /**
+   * Declares a queue with both TTL and DLX.
+   * @param queueName the queue name
+   * @param ttlMs the TTL in milliseconds
+   * @param dlxExchange the dead letter exchange name
+   * @param dlxRoutingKey the dead letter routing key
+   * @return a Future that completes when the queue is declared
+   */
+  public Future<Void> declareQueueWithTTLAndDLX(String queueName, long ttlMs, String dlxExchange, String dlxRoutingKey) {
+    final var args = new JsonObject()
+      .put("x-message-ttl", ttlMs)
+      .put("x-dead-letter-exchange", dlxExchange)
+      .put("x-dead-letter-routing-key", dlxRoutingKey);
+    return queueManagement.declareQueue(queueName, true, false, false, args);
+  }
+
+  /**
+   * Deletes the default queue.
+   * @return a Future that completes when the queue is deleted
+   */
+  public Future<Void> deleteQueue() {
+    return queueManagement.deleteQueue(queueName);
+  }
+
+  /**
+   * Purges all messages from the default queue.
+   * @return a Future that completes when the queue is purged
+   */
+  public Future<Void> purgeQueue() {
+    return queueManagement.purgeQueue(queueName);
+  }
+
+  /**
+   * Declares a direct exchange.
+   * @param exchangeName the exchange name
+   * @return a Future that completes when the exchange is declared
+   */
+  public Future<Void> declareDirectExchange(String exchangeName) {
+    return queueManagement.declareDirectExchange(exchangeName);
+  }
+
+  /**
+   * Declares a fanout exchange.
+   * @param exchangeName the exchange name
+   * @return a Future that completes when the exchange is declared
+   */
+  public Future<Void> declareFanoutExchange(String exchangeName) {
+    return queueManagement.declareFanoutExchange(exchangeName);
+  }
+
+  /**
+   * Declares a topic exchange.
+   * @param exchangeName the exchange name
+   * @return a Future that completes when the exchange is declared
+   */
+  public Future<Void> declareTopicExchange(String exchangeName) {
+    return queueManagement.declareTopicExchange(exchangeName);
+  }
+
+  /**
+   * Deletes an exchange.
+   * @param exchangeName the exchange name
+   * @return a Future that completes when the exchange is deleted
+   */
+  public Future<Void> deleteExchange(String exchangeName) {
+    return queueManagement.deleteExchange(exchangeName);
+  }
+
+  /**
+   * Binds a queue to an exchange.
+   * @param queueName the queue name
+   * @param exchangeName the exchange name
+   * @param routingKey the routing key
+   * @return a Future that completes when the binding is created
+   */
+  public Future<Void> bindQueue(String queueName, String exchangeName, String routingKey) {
+    return queueManagement.bindQueue(queueName, exchangeName, routingKey);
+  }
+
+  /**
+   * Binds the default queue to an exchange.
+   * @param exchangeName the exchange name
+   * @param routingKey the routing key
+   * @return a Future that completes when the binding is created
+   */
+  public Future<Void> bindDefaultQueue(String exchangeName, String routingKey) {
+    return bindQueue(this.queueName, exchangeName, routingKey);
+  }
+
+  /**
+   * Unbinds a queue from an exchange.
+   * @param queueName the queue name
+   * @param exchangeName the exchange name
+   * @param routingKey the routing key
+   * @return a Future that completes when the binding is removed
+   */
+  public Future<Void> unbindQueue(String queueName, String exchangeName, String routingKey) {
+    return queueManagement.unbindQueue(queueName, exchangeName, routingKey);
+  }
+
+  /**
+   * Unbinds the default queue from an exchange.
+   * @param exchangeName the exchange name
+   * @param routingKey the routing key
+   * @return a Future that completes when the binding is removed
+   */
+  public Future<Void> unbindDefaultQueue(String exchangeName, String routingKey) {
+    return unbindQueue(this.queueName, exchangeName, routingKey);
+  }
+
   /**
    * Publishes a message to the specified queue with a default priority of 1.
    * Ensures the necessary queue is declared before publishing if required.
@@ -107,8 +276,8 @@ public class MessageProducer {
    * @param message the message to be published
    * @return a Future indicating the completion of the publish operation
    */
-  Future<Void> publish(String message) {
-    return publish(message, 1);
+  public Future<Void> publish(String message) {
+    return publish(message, new PublishOptions());
   }
 
   /**
@@ -120,46 +289,65 @@ public class MessageProducer {
    * @param priority the priority of the message (range: 1 to 9)
    * @return a Future indicating the completion of the publish operation
    */
-  Future<Void> publish(String message, int priority) {
-    if (priority < 1) {
-      priority = 1;
-    } else if (priority > 9) {
-      priority = 9;
-    }
+  public Future<Void> publish(String message, int priority) {
+    final var options = new PublishOptions().setPriority(priority);
+    return publish(message, options);
+  }
 
-    final var props = new AMQP.BasicProperties(
-      null,
-      null,
-      null,
-      null,
-      priority,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null
-    );
-
+  /**
+   * Publishes a message with custom options.
+   * Provides full control over message properties and publishing behavior.
+   *
+   * @param message the message to be published
+   * @param options the publish options
+   * @return a Future indicating the completion of the publish operation
+   */
+  public Future<Void> publish(String message, PublishOptions options) {
     if (currentMetrics == null) {
-      return client.queueDeclare(this.queueName, true, false, false)
-        .compose(declareOk -> {
-          if (currentMetrics == null || notEquivalent(declareOk, currentMetrics)) {
-            this.logger.info(context, LogEvent.create("The metrics for a message producer have changed", getClass().getName(), Map.of(
-              "consumerCount", declareOk.getConsumerCount(),
-              "messageCount", declareOk.getMessageCount(),
-              "queueName", declareOk.getQueue()
-            )));
+      return queueManagement.getQueueInfo(this.queueName)
+        .compose(result -> {
+          try {
+            final var declareOk = (AMQP.Queue.DeclareOk) result;
+            if (currentMetrics == null || notEquivalent(declareOk, currentMetrics)) {
+              this.logger.info(context, LogEvent.create("The metrics for a message producer have changed", getClass().getName(), Map.of(
+                "consumerCount", declareOk.getConsumerCount(),
+                "messageCount", declareOk.getMessageCount(),
+                "queueName", declareOk.getQueue()
+              )));
+            }
+            this.currentMetrics = declareOk;
+            return start().compose(v -> queueManagement.publishToQueue(this.queueName, message, options));
+          } catch (ClassCastException e) {
+            return Future.failedFuture(e);
           }
-          this.currentMetrics = declareOk;
-          return Future.succeededFuture(declareOk);
-        }).compose(declareOk -> start().compose(v -> client.basicPublish("", this.queueName, props, Buffer.buffer(message))));
+        });
     }
 
-    //? Just send this as is.
-    return start().compose(t -> client.basicPublish("", this.queueName, props, Buffer.buffer(message)));
+    return start().compose(t -> queueManagement.publishToQueue(this.queueName, message, options));
+  }
+
+  /**
+   * Publishes a message to an exchange with a routing key.
+   *
+   * @param exchangeName the exchange name
+   * @param routingKey the routing key
+   * @param message the message to be published
+   * @param options the publish options
+   * @return a Future indicating the completion of the publish operation
+   */
+  public Future<Void> publishToExchange(String exchangeName, String routingKey, String message, PublishOptions options) {
+    return start().compose(v -> queueManagement.publishToExchange(exchangeName, routingKey, message, options));
+  }
+
+  /**
+   * Publishes a message to an exchange with a routing key using default options.
+   *
+   * @param exchangeName the exchange name
+   * @param routingKey the routing key
+   * @param message the message to be published
+   * @return a Future indicating the completion of the publish operation
+   */
+  public Future<Void> publishToExchange(String exchangeName, String routingKey, String message) {
+    return publishToExchange(exchangeName, routingKey, message, new PublishOptions());
   }
 }

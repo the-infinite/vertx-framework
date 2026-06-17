@@ -37,6 +37,7 @@ public class AppEnvironment {
   private String pgUrl;
   private String redisUrl;
   private String rabbitMqUrl;
+  private String rabbitMqVhost;
   private String mongoDbUrl;
   private String esUrl;
   private String esApiKey;
@@ -191,6 +192,7 @@ public class AppEnvironment {
     instance.pgUrl = pgUrl;
     instance.redisUrl = redisUrl;
     instance.rabbitMqUrl = rabbitMqUrl;
+    instance.rabbitMqVhost = instance.get("RABBITMQ_VHOST", "/");
     instance.mongoDbUrl = mongoDbUrl;
     instance.esUrl = esUrl;
     instance.esApiKey = esApiKey;
@@ -293,6 +295,10 @@ public class AppEnvironment {
 
   public ProcessRole getProcessRole() {
     return processRole;
+  }
+
+  public String getRabbitMqVhost() {
+    return rabbitMqVhost;
   }
 
   /**
