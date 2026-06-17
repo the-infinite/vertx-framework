@@ -1,14 +1,11 @@
 package io.github.the_infinite.framework.utils;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.fasterxml.jackson.annotation.JsonAutoDetect;
-import com.fasterxml.jackson.annotation.PropertyAccessor;
-
-import io.github.the_infinite.framework.ConfigurationRegistrant;
-import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -26,6 +23,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import io.github.the_infinite.framework.ConfigurationRegistrant;
+import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 
@@ -369,7 +368,7 @@ public final class DataHelpers {
     final var pattern = Pattern.compile(regex);
     final var matcher = pattern.matcher(" ".repeat(limit));
     return matcher.replaceAll(matchResult -> {
-      if (!matchResult.hasMatch()) {
+      if (matchResult.groupCount() > 0) {
         return matchResult.group();
       }
       final var randomBoolean = mixedCase && random.nextBoolean();

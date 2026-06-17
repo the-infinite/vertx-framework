@@ -1,5 +1,7 @@
 package io.github.the_infinite.framework.types;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -8,8 +10,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 @SuppressWarnings("ResultOfMethodCallIgnored")
 public class BatchContainerTest {
@@ -59,8 +59,10 @@ public class BatchContainerTest {
         int itemsPerThread = 100;
         BatchContainer<Integer> container = new BatchContainer<>(batchSize);
 
-        try(ExecutorService executor = Executors.newFixedThreadPool(threadCount)) {
-            CountDownLatch latch = new CountDownLatch(threadCount);
+      ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+
+      try {
+          CountDownLatch latch = new CountDownLatch(threadCount);
             for (int i = 0; i < threadCount; i++) {
                 executor.submit(() -> {
                     try {
@@ -85,7 +87,8 @@ public class BatchContainerTest {
             }
 
             assertEquals(threadCount * itemsPerThread, totalItems);
-            executor.shutdown();
+        } finally {
+           executor.shutdown();
         }
     }
 }

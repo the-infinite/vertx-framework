@@ -1,10 +1,10 @@
 package io.github.the_infinite.framework.utils;
 
+import java.util.Collection;
+import java.util.Objects;
+
 import io.github.the_infinite.framework.ConfigurationRegistrant;
 import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
-
-import java.util.Collection;
-
 import io.vertx.core.Handler;
 import io.vertx.ext.web.validation.RequestPredicate;
 import io.vertx.ext.web.validation.builder.Bodies;
@@ -102,25 +102,24 @@ public final class VertxValidationHelper {
         }
 
         for (final var validator : validators) {
-            switch (validator.validator) {
-                case ArraySchemaBuilder arraySchemaBuilder ->
-                        builder = builder.queryParameter(Parameters.param(validator.name,
-                                arraySchemaBuilder));
-                case BooleanSchemaBuilder booleanSchemaBuilder ->
-                        builder = builder.queryParameter(Parameters.param(validator.name,
-                                booleanSchemaBuilder));
-                case NumberSchemaBuilder numberSchemaBuilder ->
-                        builder = builder.queryParameter(Parameters.param(validator.name,
-                                numberSchemaBuilder));
-                case ObjectSchemaBuilder objectSchemaBuilder ->
-                        builder = builder.queryParameter(Parameters.jsonParam(validator.name,
-                                objectSchemaBuilder));
-                case StringSchemaBuilder stringSchemaBuilder ->
-                        builder = builder.queryParameter(Parameters.param(validator.name,
-                                stringSchemaBuilder));
-                default ->
-                        throw new IllegalArgumentException("Unsupported validator type: " + validator.getClass().getName());
-            }
+          if (Objects.requireNonNull(validator.validator) instanceof ArraySchemaBuilder arraySchemaBuilder) {
+            builder = builder.queryParameter(Parameters.param(validator.name,
+              arraySchemaBuilder));
+          } else if (validator.validator instanceof BooleanSchemaBuilder booleanSchemaBuilder) {
+            builder = builder.queryParameter(Parameters.param(validator.name,
+              booleanSchemaBuilder));
+          } else if (validator.validator instanceof NumberSchemaBuilder numberSchemaBuilder) {
+            builder = builder.queryParameter(Parameters.param(validator.name,
+              numberSchemaBuilder));
+          } else if (validator.validator instanceof ObjectSchemaBuilder objectSchemaBuilder) {
+            builder = builder.queryParameter(Parameters.jsonParam(validator.name,
+              objectSchemaBuilder));
+          } else if (validator.validator instanceof StringSchemaBuilder stringSchemaBuilder) {
+            builder = builder.queryParameter(Parameters.param(validator.name,
+              stringSchemaBuilder));
+          } else {
+            throw new IllegalArgumentException("Unsupported validator type: " + validator.getClass().getName());
+          }
         }
         return builder;
     }

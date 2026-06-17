@@ -50,6 +50,10 @@ public final class GenericStartup {
     return vertx;
   }
 
+  static int ceilDiv(int first, int second) {
+    return (int)Math.ceil((double)first/(double) second);
+  }
+
   public static void bootstrap(
     @NotNull StartupOptions options,
     @NotNull List<String> mountPaths,
@@ -98,7 +102,7 @@ public final class GenericStartup {
       }
 
       //? Finally, deploy this verticle.
-      serverVertx.deployVerticle(ServerVerticle::new, new DeploymentOptions().setHa(true).setWorkerPoolName("Server-Pool").setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getServerCount())).setInstances(env.getServerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy server: %s".formatted(throwable.getMessage())));
+      serverVertx.deployVerticle(ServerVerticle::new, new DeploymentOptions().setHa(true).setWorkerPoolName("Server-Pool").setWorkerPoolSize(ceilDiv(cpuCount, env.getServerCount())).setInstances(env.getServerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy server: %s".formatted(throwable.getMessage())));
     }
 
     //? If this is a worker...
@@ -107,7 +111,7 @@ public final class GenericStartup {
       final var workerVertx = createVertxInstance(false, options);
 
       //? Then we add the controllers here.
-      workerVertx.deployVerticle(WorkerVerticle::new, new DeploymentOptions().setHa(true).setWorkerPoolName("Worker-Pool").setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getWorkerCount())).setInstances(env.getWorkerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy worker: %s".formatted(throwable.getMessage())));
+      workerVertx.deployVerticle(WorkerVerticle::new, new DeploymentOptions().setHa(true).setWorkerPoolName("Worker-Pool").setWorkerPoolSize(ceilDiv(cpuCount, env.getWorkerCount())).setInstances(env.getWorkerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy worker: %s".formatted(throwable.getMessage())));
     }
 
     //? If there are any consumers, we deploy them here.
@@ -124,7 +128,7 @@ public final class GenericStartup {
       final var socketVertx = createVertxInstance(false, options);
 
       //? Finally, deploy this verticle.
-      socketVertx.deployVerticle(SocketVerticle::new, new DeploymentOptions().setHa(true).setWorkerPoolName("Socket-Pool").setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getWorkerCount())).setInstances(env.getWorkerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy socket server: %s".formatted(throwable.getMessage())));
+      socketVertx.deployVerticle(SocketVerticle::new, new DeploymentOptions().setHa(true).setWorkerPoolName("Socket-Pool").setWorkerPoolSize(ceilDiv(cpuCount, env.getWorkerCount())).setInstances(env.getWorkerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy socket server: %s".formatted(throwable.getMessage())));
     }
   }
 }

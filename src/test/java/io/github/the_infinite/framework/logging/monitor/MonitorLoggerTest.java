@@ -55,8 +55,8 @@ class MonitorLoggerTest {
       .get(5, TimeUnit.SECONDS);
 
     assertEquals(1, monitor.batchedEvents.size());
-    assertEquals(1, monitor.batchedEvents.getFirst().size());
-    assertEquals("ready", monitor.batchedEvents.getFirst().getFirst().message());
+    assertEquals(1, monitor.batchedEvents.get(0).size());
+    assertEquals("ready", monitor.batchedEvents.get(0).get(0).message());
 
     logger.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
   }
@@ -87,8 +87,8 @@ class MonitorLoggerTest {
     logger.flush().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
 
     assertEquals(1, monitor.batchedEvents.size());
-    assertEquals(1, monitor.batchedEvents.getFirst().size());
-    assertEquals("queued", monitor.batchedEvents.getFirst().getFirst().message());
+    assertEquals(1, monitor.batchedEvents.get(0).size());
+    assertEquals("queued", monitor.batchedEvents.get(0).get(0).message());
 
     logger.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
   }
@@ -107,7 +107,7 @@ class MonitorLoggerTest {
       .get(5, TimeUnit.SECONDS);
 
     assertEquals(1, monitor.singleEvents.size());
-    assertEquals("single", monitor.singleEvents.getFirst().message());
+    assertEquals("single", monitor.singleEvents.get(0).message());
 
     logger.flush().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
 

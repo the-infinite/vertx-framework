@@ -2,11 +2,6 @@ package io.github.the_infinite.framework.data;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 
-import io.github.the_infinite.framework.data.types.ChangeResultModel;
-import io.github.the_infinite.framework.data.types.PaginatedResult;
-import io.github.the_infinite.framework.data.types.RepositoryOptions;
-import io.github.the_infinite.framework.utils.DataHelpers;
-
 import org.hibernate.reactive.mutiny.Mutiny;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -16,6 +11,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 
+import io.github.the_infinite.framework.data.types.ChangeResultModel;
+import io.github.the_infinite.framework.data.types.PaginatedResult;
+import io.github.the_infinite.framework.data.types.RepositoryOptions;
+import io.github.the_infinite.framework.utils.DataHelpers;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Context;
 import io.vertx.core.Future;
@@ -164,7 +163,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
 
     final var usedLimit = previous == null ? limit : previous.limit;
     final var elements = data.stream().toList();
-    final var payload = new CursorData(usedLimit, elements.getLast().getId());
+    final var payload = new CursorData(usedLimit, elements.get(elements.size() - 1).getId());
     final var returnValue = DataHelpers.serializeObject(payload);
     return DataHelpers.toBase64(returnValue);
   }

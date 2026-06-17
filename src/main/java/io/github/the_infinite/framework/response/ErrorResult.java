@@ -1,9 +1,8 @@
 package io.github.the_infinite.framework.response;
 
-import io.github.the_infinite.framework.env.AppEnvironment;
-
 import java.util.Objects;
 
+import io.github.the_infinite.framework.env.AppEnvironment;
 import io.vertx.ext.web.validation.BodyProcessorException;
 import io.vertx.ext.web.validation.ParameterProcessorException;
 import io.vertx.ext.web.validation.RequestPredicateException;
@@ -25,25 +24,29 @@ public class ErrorResult extends Exception {
 
     public static ErrorResult of(Throwable t) {
         final var env = AppEnvironment.getInstance();
-        return switch (t) {
-            case ErrorResult er -> er;
-            case PgException e ->
-                    new ErrorResult(e.getErrorMessage(), e.getMessage(), 500);
-            case ParameterProcessorException e -> new ErrorResult(e.getMessage(),
-                    "%s at %s".formatted(e.getParameterName(),
-                            e.getLocation().name()),
-                    400);
-            case BodyProcessorException e -> new ErrorResult(e.getMessage(),
-                    "%s found %s".formatted(e.getErrorType().name(),
-                            e.getActualContentType())
-                    , 400);
-            case RequestPredicateException e -> new ErrorResult(e.getMessage(),
-                    Objects.requireNonNullElse(e.getCause(), t).getMessage(), 400);
-            default -> new ErrorResult(t.getMessage(),
-                    env.getKind() == AppEnvironment.EnvironmentKind.PRODUCTION ?
-                            "An unexpected error occurred." : t,
-                    500);
-        };
+      if (Objects.requireNonNull(t) instanceof ErrorResult er) {
+        return er;
+      } else if (t instanceof PgException e) {
+        return new ErrorResult(e.getErrorMessage(), e.getMessage(), 500);
+      } else if (t instanceof ParameterProcessorException e) {
+        return new ErrorResult(e.getMessage(),
+          "%s at %s".formatted(e.getParameterName(),
+            e.getLocation().name()),
+          400);
+      } else if (t instanceof BodyProcessorException e) {
+        return new ErrorResult(e.getMessage(),
+          "%s found %s".formatted(e.getErrorType().name(),
+            e.getActualContentType())
+          , 400);
+      } else if (t instanceof RequestPredicateException e) {
+       return new ErrorResult(e.getMessage(),
+          Objects.requireNonNullElse(e.getCause(), t).getMessage(), 400);
+      } else {
+        return new ErrorResult(t.getMessage(),
+          env.getKind() == AppEnvironment.EnvironmentKind.PRODUCTION ?
+            "An unexpected error occurred." : t,
+          500);
+      }
     }
 
     public TypedServiceResult<Object> toServiceResult() {
