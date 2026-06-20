@@ -57,7 +57,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   }
 
   /**
-   * Helps to build an updated criteria query using a given cursor. If cursor is null, it would return the supplied
+   * Helps to build an updated criteria query using a given cursor. If the cursor is null, it would return the supplied
    * criteria query. However, if it is not, it would attempt to decode the cursor and build a new criteria query around
    * the updated cursor.
    *
@@ -94,7 +94,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   }
 
   /**
-   * Helps to build an updated criteria query using a given cursor. If cursor is null, it would return the supplied
+   * Helps to build an updated criteria query using a given cursor. If the cursor is null, it would return the supplied
    * criteria query. However, if it is not, it would attempt to decode the cursor and build a new criteria query around
    * the updated cursor.
    *
