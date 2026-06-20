@@ -252,8 +252,8 @@ public class DocumentationController extends RouteController {
 
         html.append("<p><strong>Header Order:</strong> ");
         html.append(route.description().authenticationRequired()
-          ? "unprotected defaults → protected defaults → route-specific headers"
-          : "unprotected defaults → route-specific headers");
+          ? "unprotected defaults -> protected defaults -> route-specific headers"
+          : "unprotected defaults -> route-specific headers");
         html.append("</p>");
 
         if (route.description().rateLimit() != null) {

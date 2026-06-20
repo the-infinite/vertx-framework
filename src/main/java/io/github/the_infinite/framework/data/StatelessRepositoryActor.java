@@ -209,7 +209,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
   }
 
   @Override
-  Future<Optional<TModel>> createOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.StatelessSession transaction) {
+  public Future<Optional<TModel>> createOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.StatelessSession transaction) {
     //? If options are not clearly defined...
     if (options.getUserId() < 1 && this.modelType.getSuperclass().equals(BaseAuditableEntity.class)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating a record."));

@@ -1,5 +1,7 @@
 package io.github.the_infinite.framework.data.seed;
 
+import org.hibernate.reactive.mutiny.Mutiny;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -44,7 +46,13 @@ public final class DatabaseSeederHelper {
       }
 
       return repository().getMany(null, new RepositoryOptions<SeederEntry>().setLimit(3000), null)
-        .compose(entries -> execute(orderedSeeders, entries.stream().map(SeederEntry::getSeederName).collect(Collectors.toSet()), true));
+        .compose(entries -> repository().stateless().transaction(transaction -> execute(
+          transaction,
+          orderedSeeders,
+          entries.stream().map(SeederEntry::getSeederName)
+            .collect(Collectors.toSet()),
+          true
+        )));
     });
   }
 
@@ -56,18 +64,34 @@ public final class DatabaseSeederHelper {
       }
 
       return repository().getMany(null, new RepositoryOptions<SeederEntry>().setLimit(3000), null)
-        .compose(entries -> execute(orderedSeeders, entries.stream().map(SeederEntry::getSeederName).collect(Collectors.toSet()), false));
+        .compose(entries -> repository().stateless().transaction(transaction -> execute(
+          transaction,
+          orderedSeeders,
+          entries.stream().map(SeederEntry::getSeederName)
+            .collect(Collectors.toSet()),
+          false
+        )));
     });
   }
 
-  private static Future<Void> execute(List<? extends DatabaseSeeder> seeders, Set<String> executedSeeders, boolean seed) {
+  private static Future<Void> execute(Mutiny.StatelessSession transaction, List<?
+                                        extends DatabaseSeeder> seeders,
+                                      Set<String> executedSeeders, boolean seed) {
     final var promise = Promise.<Void>promise();
     final var console = ConsoleLogger.getInstance();
-    executeNext(seeders, executedSeeders, seed, 0, console, promise);
+    executeNext( transaction, seeders, executedSeeders, seed, 0, console, promise);
     return promise.future();
   }
 
-  private static void executeNext(List<? extends DatabaseSeeder> seeders, Set<String> executedSeeders, boolean seed, int index, ConsoleLogger console, Promise<Void> promise) {
+  private static void executeNext(
+    Mutiny.StatelessSession transaction,
+    List<? extends DatabaseSeeder> seeders,
+    Set<String> executedSeeders,
+    boolean seed,
+    int index,
+    ConsoleLogger console,
+    Promise<Void> promise
+  ) {
     if (index >= seeders.size()) {
       promise.succeed();
       return;
@@ -79,20 +103,20 @@ public final class DatabaseSeederHelper {
 
     if (seed && executed) {
       console.exec("Skipping already executed seeder %s.".formatted(seederName));
-      executeNext(seeders, executedSeeders, true, index + 1, console, promise);
+      executeNext(transaction, seeders, executedSeeders, true, index + 1, console, promise);
       return;
     }
 
     if (!seed && !executed) {
       console.exec("Skipping seeder %s because it has not been executed.".formatted(seederName));
-      executeNext(seeders, executedSeeders, false, index + 1, console, promise);
+      executeNext(transaction, seeders, executedSeeders, false, index + 1, console, promise);
       return;
     }
 
     final var action = seed ? "Seeding" : "Deleting seeded data for";
     console.info("%s %s...".formatted(action, seederName));
 
-    final var future = seed ? seeder.seed() : seeder.delete();
+    final var future = seed ? seeder.seed(transaction) : seeder.delete(transaction);
     future
       .onFailure(promise::fail)
       .onSuccess(ignored -> track(seederName, seed)
@@ -103,7 +127,7 @@ public final class DatabaseSeederHelper {
           } else {
             executedSeeders.remove(seederName);
           }
-          executeNext(seeders, executedSeeders, seed, index + 1, console, promise);
+          executeNext(transaction, seeders, executedSeeders, seed, index + 1, console, promise);
         }));
   }
 
