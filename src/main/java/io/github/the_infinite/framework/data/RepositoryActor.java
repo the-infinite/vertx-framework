@@ -20,6 +20,7 @@ import io.vertx.core.Context;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import jakarta.persistence.LockModeType;
+import jakarta.persistence.NoResultException;
 
 @SuppressWarnings("unused")
 public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession> permits StatefulRepositoryActor, StatelessRepositoryActor {
@@ -42,7 +43,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
     final var promise = Promise.<T>promise();
     uni.subscribe().with(promise::succeed, cause -> {
       //? If this is simply that there was no result...
-      if (cause.getMessage().toLowerCase().contains("no result found for query")) {
+      if (cause instanceof NoResultException noResultException) {
         try {
           promise.succeed((T) Optional.empty());
         } catch (ClassCastException ignored) {
