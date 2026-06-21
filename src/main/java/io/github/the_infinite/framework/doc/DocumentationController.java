@@ -31,7 +31,7 @@ public class DocumentationController extends RouteController {
   public void registerRoutes() {
     registrant.getRouter().route().order(-1).handler(BodyHandler.create());
     registrant.getRouter().route().order(0).handler(context -> {
-      String testClient = context.request().getHeader("X-TM30-Test-Client");
+      String testClient = context.request().getHeader("X-Moovable-Test-Client");
       String accept = context.request().getHeader("Accept");
       String path = context.request().path();
 
@@ -126,38 +126,58 @@ public class DocumentationController extends RouteController {
     html.append("<!DOCTYPE html><html><head><title>API Documentation</title>");
     html.append("<meta name='viewport' content='width=device-width, initial-scale=1'>");
     html.append("<style>")
-      .append("body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 1000px; margin: 0 auto; padding: 2rem; background-color: #f4f7f6; }")
-      .append("@media (max-width: 768px) { body { padding: 1rem; } .route-summary { flex-direction: column; align-items: flex-start; } .method { min-width: auto; width: 100%; margin-bottom: 0.5rem; } .name { margin-left: 0; margin-top: 0.5rem; } }")
-      .append("h1, h2, h3 { color: #2c3e50; }")
-      .append(".global-settings { background: #fff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 2rem; }")
-      .append(".controller-section { margin-bottom: 3rem; }")
-      .append(".controller-name { background: #eef2f7; padding: 0.75rem 1.5rem; border-radius: 8px 8px 0 0; border: 1px solid #d1d9e6; border-bottom: none; font-size: 1.25rem; font-weight: bold; color: #34495e; }")
-      .append(".route { background: #fff; border-radius: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 0; border: 1px solid #e1e4e8; overflow: hidden; }")
-      .append(".route:not(:last-child) { border-bottom: none; }")
-      .append(".route:last-child { border-radius: 0 0 8px 8px; }")
-      .append(".route-summary { padding: 1rem; cursor: pointer; display: flex; align-items: center; background: #fff; transition: background 0.2s; }")
-      .append(".route[open] .route-summary { border-bottom: 1px solid #e1e4e8; background: #f8f9fa; }")
-      .append(".method { font-size: 0.8rem; padding: 0.4rem 0.8rem; border-radius: 4px; color: #fff; font-weight: 700; min-width: 80px; text-align: center; margin-right: 1rem; text-transform: uppercase; }")
-      .append(".method-GET { background-color: #61affe; }")
-      .append(".method-POST { background-color: #49cc90; }")
-      .append(".method-PUT { background-color: #fca130; }")
-      .append(".method-DELETE { background-color: #f93e3e; }")
-      .append(".method-PATCH { background-color: #50e3c2; }")
-      .append(".path { font-family: 'Fira Code', 'Courier New', monospace; font-weight: 600; font-size: 1.1rem; color: #303133; word-break: break-all; }")
-      .append(".name { margin-left: auto; font-size: 0.9rem; color: #909399; font-weight: 400; }")
-      .append(".route-details { padding: 1.5rem; background: #fff; }")
-      .append("h4 { margin-top: 1.5rem; margin-bottom: 0.5rem; color: #606266; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; }")
-      .append("pre { background-color: #272822; color: #f8f8f2; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.9rem; margin: 0; }")
-      .append("code { background: #e1e4e8; padding: 0.2rem 0.4rem; border-radius: 3px; font-family: monospace; }")
-      .append("ul { list-style: none; padding-left: 0; }")
-      .append("li { margin-bottom: 0.5rem; }")
-      .append(".try-it-out { margin-top: 2rem; border-top: 1px solid #e1e4e8; padding: 1.5rem; background: #fafafa; border-radius: 8px; border: 1px solid #eee; }")
-      .append(".test-input { width: 100%; padding: 0.5rem; border: 1px solid #dcdfe6; border-radius: 4px; margin-bottom: 0.5rem; font-family: inherit; box-sizing: border-box; }")
-      .append(".execute-btn { background-color: #2c3e50; color: #fff; padding: 0.6rem 1.2rem; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 1rem; }")
-      .append(".execute-btn:hover { background-color: #34495e; }")
-      .append(".test-result { margin-top: 1.5rem; padding: 1rem; background: #f8f9fa; border-radius: 6px; border: 1px solid #e1e4e8; display: none; }")
-      .append(".result-header { font-weight: bold; margin-bottom: 0.5rem; color: #2c3e50; }")
-      .append("</style></head><body>");
+      .append(".swagger-ui { --swagger-blue: #61affe; --swagger-green: #49cc90; --swagger-orange: #fca130; --swagger-red: #f93e3e; --swagger-cyan: #50e3c2; --swagger-ink: #3b4151; --swagger-muted: #6b7280; --swagger-border: #d9dee7; --swagger-surface: #fff; --swagger-surface-2: #f8fafc; --swagger-shadow: 0 10px 32px rgba(15, 23, 42, 0.08); background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%); color: var(--swagger-ink); min-height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }")
+      .append(".swagger-ui .page-shell { max-width: 1200px; margin: 0 auto; padding: 2rem 1rem 3rem; }")
+      .append(".swagger-ui h1 { color: #213547; font-size: clamp(2rem, 4vw, 2.6rem); letter-spacing: -0.03em; margin: 0 0 1rem; }")
+      .append(".swagger-ui h2, .swagger-ui h3, .swagger-ui h4 { color: var(--swagger-ink); margin-top: 0; }")
+      .append(".swagger-ui h2 { font-size: 1.35rem; margin-bottom: 0.75rem; }")
+      .append(".swagger-ui h3 { font-size: 1.1rem; margin-bottom: 0.6rem; }")
+      .append(".swagger-ui h4 { margin-top: 1.25rem; margin-bottom: 0.6rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #5b6472; }")
+      .append(".swagger-ui .global-settings, .swagger-ui .route, .swagger-ui .try-it-out, .swagger-ui .test-result { background: var(--swagger-surface); border: 1px solid var(--swagger-border); border-radius: 12px; box-shadow: var(--swagger-shadow); }")
+      .append(".swagger-ui .global-settings { padding: 1.5rem; margin-bottom: 1.5rem; }")
+      .append(".swagger-ui .controller-section { margin-bottom: 2rem; }")
+      .append(".swagger-ui .controller-name { background: linear-gradient(180deg, #eff4fb, #e9eef7); padding: 0.9rem 1.2rem; border: 1px solid var(--swagger-border); border-radius: 12px 12px 0 0; border-bottom: none; font-size: 1.05rem; font-weight: 700; color: #2f3b52; }")
+      .append(".swagger-ui details.route { margin: 0; overflow: hidden; border-left: 5px solid var(--route-accent, var(--swagger-blue)); }")
+      .append(".swagger-ui .route:not(:last-child) { border-bottom: none; }")
+      .append(".swagger-ui .route-summary { padding: 1rem 1.1rem; cursor: pointer; display: flex; align-items: center; gap: 0.85rem; background: #fff; transition: background 0.2s ease, box-shadow 0.2s ease; }")
+      .append(".swagger-ui .route-summary:hover { background: #f8fbff; }")
+      .append(".swagger-ui .route[open] .route-summary { border-bottom: 1px solid #e6edf7; background: #f8fbff; }")
+      .append(".swagger-ui .method { font-size: 0.78rem; padding: 0.45rem 0.75rem; border-radius: 999px; color: #fff; font-weight: 800; min-width: 88px; text-align: center; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }")
+      .append(".swagger-ui .method-GET { background-color: #61affe; }")
+      .append(".swagger-ui .method-POST { background-color: #49cc90; }")
+      .append(".swagger-ui .method-PUT { background-color: #fca130; }")
+      .append(".swagger-ui .method-DELETE { background-color: #f93e3e; }")
+      .append(".swagger-ui .method-PATCH { background-color: #50e3c2; color: #17313a; }")
+      .append(".swagger-ui .route-get { --route-accent: #61affe; } .swagger-ui .route-post { --route-accent: #49cc90; } .swagger-ui .route-put { --route-accent: #fca130; } .swagger-ui .route-delete { --route-accent: #f93e3e; } .swagger-ui .route-patch { --route-accent: #50e3c2; }")
+      .append(".swagger-ui .path { font-family: 'Fira Code', 'Courier New', monospace; font-weight: 700; font-size: 1rem; color: #303133; word-break: break-all; }")
+      .append(".swagger-ui .name { margin-left: auto; font-size: 0.9rem; color: #7c8594; font-weight: 500; }")
+      .append(".swagger-ui .route-details { padding: 1.35rem 1.1rem 1.5rem; background: #fff; }")
+      .append(".swagger-ui .route-details p { color: var(--swagger-ink); margin: 0.35rem 0; }")
+      .append(".swagger-ui pre { background: #1f2937; color: #e5e7eb; padding: 1rem 1.1rem; border-radius: 10px; overflow-x: auto; font-size: 0.9rem; margin: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }")
+      .append(".swagger-ui code { background: #edf2f7; color: #2f3b52; padding: 0.2rem 0.45rem; border-radius: 6px; font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.95em; }")
+      .append(".swagger-ui ul { list-style: none; padding-left: 0; margin: 0.25rem 0 0; }")
+      .append(".swagger-ui li { margin-bottom: 0.5rem; }")
+      .append(".swagger-ui .try-it-out { margin-top: 1.5rem; padding: 1.25rem; background: linear-gradient(180deg, #ffffff, #fbfcfe); }")
+      .append(".swagger-ui .body-editor { margin-top: 1rem; }")
+      .append(".swagger-ui .body-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.65rem; }")
+      .append(".swagger-ui .body-editor__header h4 { margin: 0; }")
+      .append(".swagger-ui .body-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }")
+      .append(".swagger-ui .utility-btn, .swagger-ui .execute-btn { appearance: none; border: 1px solid transparent; border-radius: 8px; cursor: pointer; font-weight: 700; transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.2s ease, border-color 0.2s ease; }")
+      .append(".swagger-ui .utility-btn { background: #fff; border-color: #cfd7e3; color: #334155; padding: 0.55rem 0.8rem; font-size: 0.85rem; }")
+      .append(".swagger-ui .utility-btn:hover { background: #f8fbff; border-color: #aab8cf; box-shadow: 0 6px 14px rgba(15,23,42,0.08); }")
+      .append(".swagger-ui .utility-btn--primary { border-color: #61affe; color: #1e63b7; }")
+      .append(".swagger-ui .utility-btn--secondary { border-color: #dbe2ec; color: #475569; }")
+      .append(".swagger-ui .test-input { width: 100%; padding: 0.7rem 0.8rem; border: 1px solid #d3dae6; border-radius: 8px; margin-bottom: 0.65rem; font-family: inherit; box-sizing: border-box; background: #fff; color: #1f2937; box-shadow: inset 0 1px 2px rgba(15,23,42,0.04); }")
+      .append(".swagger-ui .test-input:focus { outline: none; border-color: #61affe; box-shadow: 0 0 0 3px rgba(97,174,254,0.16); }")
+      .append(".swagger-ui .request-body-input { min-height: 190px; resize: vertical; font-family: 'Fira Code', 'Courier New', monospace; background: #fcfdff; }")
+      .append(".swagger-ui .execute-btn { background: linear-gradient(180deg, #61affe, #4990e2); color: #fff; padding: 0.75rem 1.15rem; margin-top: 1rem; box-shadow: 0 8px 18px rgba(73,144,226,.24); }")
+      .append(".swagger-ui .execute-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(73,144,226,.3); }")
+      .append(".swagger-ui .test-result { margin-top: 1.25rem; padding: 1rem; background: #f8fafc; border-radius: 10px; border: 1px solid #e2e8f0; display: none; }")
+      .append(".swagger-ui .result-header { font-weight: 800; margin-bottom: 0.75rem; color: #213547; }")
+      .append(".swagger-ui select { background: #fff; border: 1px solid #cfd7e3; border-radius: 8px; color: #334155; padding: 0.65rem 2.25rem 0.65rem 0.85rem; box-shadow: inset 0 1px 2px rgba(15,23,42,0.04); }")
+      .append(".swagger-ui textarea { min-height: 180px; }")
+      .append("@media (max-width: 768px) { .swagger-ui .page-shell { padding: 1rem; } .swagger-ui .route-summary { flex-direction: column; align-items: flex-start; } .swagger-ui .method { min-width: auto; width: 100%; margin-bottom: 0.25rem; } .swagger-ui .name { margin-left: 0; } .swagger-ui .body-editor__header { align-items: flex-start; flex-direction: column; } }")
+      .append("</style></head><body class='swagger-ui'><div class='page-shell'>");
 
     html.append("<h1>API Documentation</h1>");
 
@@ -234,7 +254,7 @@ public class DocumentationController extends RouteController {
       html.append("<div class='controller-name'>").append(controller).append("</div>");
 
       for (DocumentationRegistrant.RegisteredRoute route : routes) {
-        html.append("<details class='route'>");
+        html.append("<details class='route route-").append(route.method().toLowerCase(Locale.ROOT)).append("'>");
         html.append("<summary class='route-summary'>");
         html.append("<span class='method method-").append(route.method()).append("'>").append(route.method()).append("</span>");
         html.append("<span class='path'>").append(route.path()).append("</span>");
@@ -374,13 +394,22 @@ public class DocumentationController extends RouteController {
         }
 
         if ("POST".equals(route.method()) || "PUT".equals(route.method()) || "PATCH".equals(route.method())) {
-          html.append("<h4>Request Body</h4>");
-          html.append("<textarea id='body-").append(routeId).append("' class='test-input' style='height: 150px; font-family: monospace;'>");
           Map<String, String> bodyExamples = getExamples(route.description().requestBodyClass());
-          if (!bodyExamples.isEmpty()) {
-            html.append(bodyExamples.values().iterator().next());
-          }
-          html.append("</textarea>");
+          String requestBodyExample = bodyExamples.isEmpty() ? "" : bodyExamples.values().iterator().next();
+
+          html.append("<div class='body-editor'>");
+          html.append("<div class='body-editor__header'>");
+          html.append("<h4>Request Body</h4>");
+          html.append("<div class='body-actions'>");
+          html.append("<button type='button' class='utility-btn utility-btn--primary' onclick='copyRequestBody(\"").append(routeId).append("\", this)'>Copy body</button>");
+          html.append("<button type='button' class='utility-btn utility-btn--secondary' onclick='resetRequestBody(\"").append(routeId).append("\", this)'>Reset example</button>");
+          html.append("</div></div>");
+          html.append("<textarea id='body-").append(routeId).append("' class='test-input request-body-input' data-example=\"")
+            .append(escapeForHtmlAttribute(requestBodyExample))
+            .append("\">")
+            .append(escapeForHtml(requestBodyExample))
+            .append("</textarea>");
+          html.append("</div>");
         }
 
         html.append("<button class='execute-btn' onclick='executeTest(\"").append(route.method()).append("\", \"").append(route.path()).append("\", \"").append(routeId).append("\")'>Execute</button>");
@@ -400,6 +429,72 @@ public class DocumentationController extends RouteController {
 
       function delay(ms) {
         return new Promise(resolve => window.setTimeout(resolve, ms));
+      }
+
+      function getRequestBodyTextarea(routeId) {
+        return document.getElementById('body-' + routeId);
+      }
+
+      function flashButton(button, label) {
+        if (!button) return;
+        const original = button.textContent;
+        button.textContent = label;
+        window.setTimeout(() => {
+          button.textContent = original;
+        }, 1100);
+      }
+
+      async function copyTextToClipboard(text) {
+        const value = text == null ? '' : String(text);
+
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(value);
+            return true;
+          }
+        } catch (error) {
+          // Fall through to the legacy clipboard path.
+        }
+
+        const fallback = document.createElement('textarea');
+        fallback.value = value;
+        fallback.setAttribute('readonly', '');
+        fallback.style.position = 'fixed';
+        fallback.style.left = '-9999px';
+        fallback.style.top = '-9999px';
+        fallback.style.opacity = '0';
+        document.body.appendChild(fallback);
+        fallback.focus();
+        fallback.select();
+
+        let copied = false;
+        try {
+          copied = document.execCommand('copy');
+        } catch (error) {
+          copied = false;
+        } finally {
+          document.body.removeChild(fallback);
+        }
+
+        return copied;
+      }
+
+      async function copyRequestBody(routeId, button) {
+        const textarea = getRequestBodyTextarea(routeId);
+        if (!textarea) return;
+
+        const copied = await copyTextToClipboard(textarea.value || '');
+        if (copied) {
+          flashButton(button, 'Copied');
+        }
+      }
+
+      function resetRequestBody(routeId, button) {
+        const textarea = getRequestBodyTextarea(routeId);
+        if (!textarea) return;
+
+        textarea.value = textarea.dataset.example || '';
+        flashButton(button, 'Reset');
       }
 
       function headersToObject(headers) {
@@ -730,8 +825,25 @@ public class DocumentationController extends RouteController {
       </script>
       """.formatted(defaultClientId, Boolean.toString(isProduction),
       escapeForJsSingleQuotedString(documentationPath)));
-    html.append("</body></html>");
+    html.append("</div></body></html>");
     return html.toString();
+  }
+
+  private String escapeForHtml(String value) {
+    if (value == null) {
+      return "";
+    }
+
+    return value
+      .replace("&", "&amp;")
+      .replace("<", "&lt;")
+      .replace(">", "&gt;")
+      .replace("\"", "&quot;")
+      .replace("'", "&#39;");
+  }
+
+  private String escapeForHtmlAttribute(String value) {
+    return escapeForHtml(value);
   }
 
   private String escapeForJsSingleQuotedString(String value) {
@@ -793,10 +905,10 @@ public class DocumentationController extends RouteController {
     try {
       String example = dto.toExample();
       html.append("<pre id='").append(sectionId).append("-0' class='").append(sectionId).append("-item'>")
-        .append(example)
+        .append(escapeForHtml(example))
         .append("</pre>");
     } catch (Exception e) {
-      html.append("<pre>Could not generate example: ").append(e.getMessage()).append("</pre>");
+      html.append("<pre>Could not generate example: ").append(escapeForHtml(e.getMessage())).append("</pre>");
     }
   }
 
@@ -821,7 +933,7 @@ public class DocumentationController extends RouteController {
     int index = 0;
     for (Map.Entry<String, String> entry : examples.entrySet()) {
       html.append("<pre id='").append(sectionId).append("-").append(index).append("' class='").append(sectionId).append("-item' style='").append(index == 0 ? "" : "display: none;").append("'>")
-        .append(entry.getValue())
+        .append(escapeForHtml(entry.getValue()))
         .append("</pre>");
       index++;
     }

@@ -2,6 +2,7 @@ package io.github.the_infinite.framework.data;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 
+import org.hibernate.CacheMode;
 import org.hibernate.reactive.mutiny.Mutiny;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -118,22 +119,22 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
 
     return this.getOrCreateSession(transaction, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, start()), usedCursor);
-      return session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult();
+      return session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).setCacheMode(CacheMode.IGNORE).setCacheable(false).getSingleResult();
     });
   }
 
   @Override
   public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.StatelessSession transaction) {
-//? This is fine.
+    //? This is fine.
     final var usedCursor = options == null ? null : options.getCursor();
     final var usedLimit = options == null ? 30 : options.getLimit();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
     final var countAtom = new AtomHolder<Long>();
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult().chain(count -> {
+    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).setCacheMode(CacheMode.IGNORE).setCacheable(false).getSingleResult().chain(count -> {
       countAtom.set(count);
-      return session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
+      return session.createQuery(usedFilters.select().query()).setCacheMode(CacheMode.IGNORE).setCacheable(false).setMaxResults(usedLimit).getResultList();
     }).map(Unchecked.function(data -> {
       String nextCursor = null;
 
@@ -179,7 +180,13 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
 
     //? Now, run a query with that session.
-    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getSingleResult().map(Optional::ofNullable));
+    final var q = usedFilters.select().query();
+    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(q)
+      .setCacheMode(CacheMode.IGNORE)
+      .setCacheable(false)
+      .setMaxResults(usedLimit)
+      .getResultList()
+      .map(data -> data.isEmpty() ? Optional.empty() : Optional.ofNullable(data.getFirst())));
   }
 
   @Override
@@ -241,7 +248,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList().chain(data -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> session.createQuery(usedFilters.select().query())      .setCacheMode(CacheMode.IGNORE).setCacheable(false).setMaxResults(usedLimit).getResultList().chain(data -> {
       final var changeList = new ArrayList<TModel>();
 
       //? Change each entity herein.
@@ -276,21 +283,27 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     }
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getSingleResult().chain(data -> {
-      if (data == null) {
-        return Uni.createFrom().item(Optional.empty());
-      }
+    return this.getOrCreateTransaction(transaction, (session, _) -> session.createQuery(usedFilters.select().query())
+      .setCacheMode(CacheMode.IGNORE)
+      .setCacheable(false)
+      .setMaxResults(usedLimit)
+      .getResultList()
+      .chain(data -> {
+        if (data.isEmpty()) {
+          return Uni.createFrom().item(Optional.empty());
+        }
 
-      if (!valueChanger.change(session, data)) {
-        return Uni.createFrom().item(Optional.of(data));
-      }
+        final var entity = data.getFirst();
+        if (!valueChanger.change(session, entity)) {
+          return Uni.createFrom().item(Optional.of(entity));
+        }
 
-      if (data instanceof BaseAuditableEntity ae) {
-        ae.setUpdatedById(options.getUserId());
-      }
+        if (entity instanceof BaseAuditableEntity ae) {
+          ae.setUpdatedById(options.getUserId());
+        }
 
-      return session.update(data).map(_ -> Optional.of(data));
-    }));
+        return session.update(entity).map(_ -> Optional.of(entity));
+      }));
   }
 
   @Override
