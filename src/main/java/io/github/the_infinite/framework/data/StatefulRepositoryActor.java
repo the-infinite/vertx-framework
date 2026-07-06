@@ -17,8 +17,10 @@ import io.github.the_infinite.framework.data.types.RepositoryOptions;
 import io.github.the_infinite.framework.utils.AtomHolder;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.unchecked.Unchecked;
+import io.vertx.core.Context;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
+import io.vertx.core.Vertx;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.LockModeType;
 
@@ -31,11 +33,12 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   protected <T> Future<T> getOrCreateSession(@Nullable Mutiny.Session transaction, SessionBoundHandler<Mutiny.Session, T> handler) {
     final var globalVertx = ConfigurationRegistrant.vertx();
     final var context = globalVertx.getOrCreateContext();
+    final var currentContext = Vertx.currentContext();
     final var promise = Promise.<T>promise();
 
     if (transaction != null) {
       try {
-        wrap(handler.handle(transaction, io.vertx.core.Vertx.currentContext())).onSuccess(promise::succeed).onFailure(promise::fail);
+        wrap(handler.handle(transaction, currentContext), currentContext).onSuccess(promise::succeed).onFailure(promise::fail);
       } catch (Throwable t) {
         promise.fail(t);
       }
@@ -48,7 +51,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
 
     context.runOnContext(ignored -> {
       try {
-        wrap(sessionFactory.withSession((session) -> handler.handle(session, context))).onSuccess(promise::succeed).onFailure(promise::fail);
+        wrap(sessionFactory.withSession((session) -> handler.handle(session, context)), context).onSuccess(promise::succeed).onFailure(promise::fail);
       } catch (Throwable t) {
         promise.fail(t);
       }
@@ -72,7 +75,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
 
     context.runOnContext(ignored -> {
       try {
-        wrap(sessionFactory.withTransaction((session, _) -> handler.handle(session, context))).onSuccess(promise::succeed).onFailure(promise::fail);
+        wrap(sessionFactory.withTransaction((session, _) -> handler.handle(session, context)), context).onSuccess(promise::succeed).onFailure(promise::fail);
       } catch (Throwable t) {
         promise.fail(t);
       }
@@ -82,6 +85,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
 
   @Override
   public <ReturnType> Future<ReturnType> transaction(Function<Mutiny.Session, Future<ReturnType>> future) {
+    final Context context = Vertx.currentContext();
     final var uni = sessionFactory.withTransaction((session, tx) -> Uni.createFrom().<ReturnType>emitter(em -> {
       final Future<ReturnType> transactionFuture;
       try {
@@ -93,6 +97,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
       }
 
       transactionFuture.andThen(transactionResult -> {
+        final Runnable completeTransaction = () -> {
         try {
           if (transactionResult.failed()) {
             tx.markForRollback();
@@ -106,9 +111,16 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
           tx.markForRollback();
           em.fail(t);
         }
+        };
+
+        if (context != null && Vertx.currentContext() != context) {
+          context.runOnContext(_ -> completeTransaction.run());
+        } else {
+          completeTransaction.run();
+        }
       });
     }));
-    return wrap(uni);
+    return wrap(uni, context);
   }
 
   @Override

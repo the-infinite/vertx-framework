@@ -90,6 +90,36 @@ public final class CorrelationContext {
     return Optional.ofNullable(get(CONTEXT_USER));
   }
 
+  /// Gets the request IP address for this correlation context.
+  /// For HTTP requests, this prefers forwarded headers and falls back to the request's remote address.
+  /// This cannot be set if this correlation context was not created with a `RoutingContext`.
+  public String requestIpAddress() {
+    if (routingContext == null) {
+      throw new UnsupportedOperationException("Cannot get request IP address because this is not a correlation group of a HTTP request");
+    }
+
+    final var request = routingContext.request();
+    final var forwardedFor = request.getHeader("X-Forwarded-For");
+    if (forwardedFor != null && !forwardedFor.isBlank()) {
+      final var forwardedIp = forwardedFor.split(",", 2)[0].trim();
+      if (!forwardedIp.isEmpty()) {
+        return forwardedIp;
+      }
+    }
+
+    final var realIp = request.getHeader("X-Real-IP");
+    if (realIp != null && !realIp.isBlank()) {
+      return realIp.trim();
+    }
+
+    final var remoteAddress = request.remoteAddress();
+    if (remoteAddress != null) {
+      return remoteAddress.hostAddress();
+    }
+
+    throw new IllegalStateException("Cannot determine request IP address because the remote address is unavailable");
+  }
+
   /// Is the context this correlation context enclosing still useful? Used as a means of checking to avoid throwing
   /// errors that could have been otherwise avoided.
   public boolean isAvailable() {

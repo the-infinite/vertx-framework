@@ -19,6 +19,7 @@ import io.smallrye.mutiny.Uni;
 import io.vertx.core.Context;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
+import io.vertx.core.Vertx;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.NoResultException;
 
@@ -38,10 +39,14 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
    * bridges the gap between these two asynchronous paradigms, allowing for seamless integration of Mutiny-based database
    * operations within the Vert.x Future-based repository API.
    */
-  @SuppressWarnings("unchecked")
   static <T> Future<T> wrap(Uni<T> uni) {
+    return wrap(uni, Vertx.currentContext());
+  }
+
+  @SuppressWarnings("unchecked")
+  static <T> Future<T> wrap(Uni<T> uni, @Nullable Context context) {
     final var promise = Promise.<T>promise();
-    uni.subscribe().with(promise::succeed, cause -> {
+    final Runnable subscribe = () -> uni.subscribe().with(promise::succeed, cause -> {
       //? If this is simply that there was no result...
       if (cause instanceof NoResultException noResultException) {
         try {
@@ -53,6 +58,13 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
         promise.fail(cause);
       }
     });
+
+    if (context != null) {
+      context.runOnContext(_ -> subscribe.run());
+    } else {
+      subscribe.run();
+    }
+
     return promise.future();
   }
 
