@@ -58,6 +58,10 @@ public abstract class BaseEntity implements Serializable {
     return this;
   }
 
+  public String getUuid() {
+    return this.uid.toString();
+  }
+
   @Override
   public boolean equals(Object obj) {
     if (this == obj) return true;
