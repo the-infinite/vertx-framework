@@ -247,11 +247,9 @@ public class DocumentationController extends RouteController {
 
     Map<String, List<DocumentationRegistrant.RegisteredRoute>> grouped = getGroupedRoutes(registrant);
 
-    grouped.forEach((controller, routes) -> {
-      if ("DocumentationController".equals(controller))
-        return;
+    grouped.forEach((group, routes) -> {
       html.append("<div class='controller-section'>");
-      html.append("<div class='controller-name'>").append(controller).append("</div>");
+      html.append("<div class='controller-name'>").append(group).append("</div>");
 
       for (DocumentationRegistrant.RegisteredRoute route : routes) {
         html.append("<details class='route route-").append(route.method().toLowerCase(Locale.ROOT)).append("'>");
@@ -886,13 +884,17 @@ public class DocumentationController extends RouteController {
     Map<String, List<DocumentationRegistrant.RegisteredRoute>> grouped = new TreeMap<>();
     List<DocumentationRegistrant.RegisteredRoute> routes = new ArrayList<>(registrant.getRegisteredRoutes());
 
-    // Sort routes by path to have a consistent order within controllers
+    // Sort routes by path to have a consistent order within groups
     routes.sort(Comparator.comparing(DocumentationRegistrant.RegisteredRoute::path)
       .thenComparing(DocumentationRegistrant.RegisteredRoute::method));
 
     for (DocumentationRegistrant.RegisteredRoute route : routes) {
-      List<DocumentationRegistrant.RegisteredRoute> controllerRoutes = grouped.computeIfAbsent(route.controllerClass(), ignored -> new ArrayList<>());
-      controllerRoutes.add(route);
+      if ("DocumentationController".equals(route.controllerClass())) {
+        continue;
+      }
+
+      List<DocumentationRegistrant.RegisteredRoute> groupRoutes = grouped.computeIfAbsent(route.description().group(), ignored -> new ArrayList<>());
+      groupRoutes.add(route);
     }
 
     cachedGroupedRoutes = grouped;

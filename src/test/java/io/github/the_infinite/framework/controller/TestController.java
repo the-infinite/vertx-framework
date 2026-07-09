@@ -7,7 +7,8 @@ import io.github.the_infinite.framework.doc.RouteDescription;
 import io.vertx.core.Vertx;
 
 public final class TestController extends RouteController {
-  private final RouteController.RouteHandler<String> testController = (context, promise) -> promise.succeed(new Okay<>("test"));
+  private final RouteController.RouteHandler<String> testController =
+    (ignored, promise) -> promise.succeed(new Okay<>("test"));
 
   public TestController(Vertx vertx) {
     super(vertx, "/");
@@ -16,6 +17,7 @@ public final class TestController extends RouteController {
   @Override
   public void registerRoutes() {
     RouteDescription description = RouteDescription.builder()
+      .group("Testing")
       .name("Greet")
       .description("Greets the user")
       .addPathParameter("name", "The name of the user to greet")

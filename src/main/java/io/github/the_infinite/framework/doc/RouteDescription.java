@@ -17,7 +17,8 @@ import io.vertx.core.json.JsonObject;
  *
  */
 @SuppressWarnings("unused")
-public record RouteDescription(String name, String description,
+public record RouteDescription(String group,
+                               String name, String description,
                                @Nullable Class<?> requestBodyClass,
                                Map<Integer, DocumentableDTO> responseDTOs,
                                @Nullable Map<String, String> headers,
@@ -34,6 +35,7 @@ public record RouteDescription(String name, String description,
     DocumentationRegistrant.getInstance();
 
   /**
+   * @param group                  Logical group shown in documentation for this route.
    * @param name                   Human-readable name of the route.
    * @param description            A detailed description of what the route does.
    * @param requestBodyClass       The class of the DTO used in the request body, or null if not applicable.
@@ -47,11 +49,16 @@ public record RouteDescription(String name, String description,
    * @param authenticationComment   The reason why authentication is or isn't required.
    */
   public RouteDescription {
+    if (group == null || group.isBlank()) {
+      throw new IllegalArgumentException("RouteDescription group is required");
+    }
+    group = group.trim();
   }
 
   /**
    * Backward compatible constructor.
    *
+   * @param group                  Logical group shown in documentation for this route.
    * @param name                   Human-readable name of the route.
    * @param description            A detailed description of what the route does.
    * @param requestBodyClass       The class of the DTO used in the request body, or null if not applicable.
@@ -63,7 +70,8 @@ public record RouteDescription(String name, String description,
    * @param authenticationRequired Whether authentication is required to access this route.
    * @param authenticationComment   The reason why authentication is or isn't required.
    */
-  public RouteDescription(String name, String description,
+  public RouteDescription(String group,
+                          String name, String description,
                           @Nullable Class<?> requestBodyClass,
                           Map<Integer, DocumentableDTO> responseDTOs,
                           @Nullable Map<String, String> headers,
@@ -72,7 +80,7 @@ public record RouteDescription(String name, String description,
                           @Nullable Integer rateLimit,
                           boolean authenticationRequired,
                           @Nullable String authenticationComment) {
-    this(name, description, requestBodyClass, responseDTOs, headers, pathParameters, null, queryParameters, null, null, rateLimit, authenticationRequired, authenticationComment);
+    this(group, name, description, requestBodyClass, responseDTOs, headers, pathParameters, null, queryParameters, null, null, rateLimit, authenticationRequired, authenticationComment);
   }
 
   /**
@@ -154,6 +162,7 @@ public record RouteDescription(String name, String description,
     private final Map<String, String> queryParameters = new HashMap<>();
     private final Map<String, String> queryParameterDefaults = new HashMap<>();
     private final Map<String, FileParameter> fileParameters = new HashMap<>();
+    private String group;
     private String name;
     private String description;
     private Class<?> requestBodyClass;
@@ -162,6 +171,11 @@ public record RouteDescription(String name, String description,
     private Integer rateLimit;
     private boolean authenticationRequired = false;
     private String authenticationComment;
+
+    public Builder group(String group) {
+      this.group = group;
+      return this;
+    }
 
     public Builder name(String name) {
       this.name = name;
@@ -295,10 +309,15 @@ public record RouteDescription(String name, String description,
     }
 
     public RouteDescription build() {
+      if (group == null || group.isBlank()) {
+        throw new IllegalStateException("RouteDescription group is required");
+      }
+
       if(requestBodyClass == null && !fileParameters.isEmpty()) {
         requestBodyClass = FileParameter.class; // Ensure requestBodyClass is set to enable file parameter documentation.
       }
       return new RouteDescription(
+        group,
         name,
         description,
         requestBodyClass,
