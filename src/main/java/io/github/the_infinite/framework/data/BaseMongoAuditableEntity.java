@@ -1,23 +1,28 @@
 package io.github.the_infinite.framework.data;
 
+import lombok.Getter;
+
+@Getter
 @SuppressWarnings("unused")
-public class BaseMongoAuditableEntity extends BaseMongoEntity {
-  private long createdById;
-  private long updatedById;
+public class BaseMongoAuditableEntity<TUser> extends BaseMongoEntity {
+  private TUser createdBy;
+  private TUser updatedBy;
 
-  public long getCreatedById() {
-    return createdById;
+  void setCreatedBy(TUser createdBy) {
+    if (createdBy instanceof BaseMongoEntity) {
+      this.createdBy = createdBy;
+      return;
+    }
+
+    throw new IllegalArgumentException("Created by user must be an instance of BaseMongoEntity.");
   }
 
-  public void setCreatedById(long createdById) {
-    this.createdById = createdById;
-  }
+  void setUpdatedBy(TUser updatedBy) {
+    if (updatedBy instanceof BaseMongoEntity) {
+      this.updatedBy = updatedBy;
+      return;
+    }
 
-  public long getUpdatedById() {
-    return updatedById;
-  }
-
-  public void setUpdatedById(long updatedById) {
-    this.updatedById = updatedById;
+    throw new IllegalArgumentException("Updated by user must be an instance of BaseMongoEntity.");
   }
 }

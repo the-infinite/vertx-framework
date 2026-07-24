@@ -84,8 +84,12 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
    * Confirms whether the given resource is owned by the specified user.
    */
   public boolean isOwner(TModel item, long userId) {
-    if (item instanceof BaseMongoAuditableEntity ae) {
-      return ae.getCreatedById() == userId;
+    return this.isOwner(item, Long.valueOf(userId));
+  }
+
+  public boolean isOwner(TModel item, Object user) {
+    if (item instanceof BaseMongoAuditableEntity<?> ae) {
+      return Objects.equals(ae.getCreatedBy(), user);
     }
     return false;
   }
@@ -94,8 +98,12 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
    * Checks if the specified user has access to the given item.
    */
   public boolean isAccessible(TModel model, long userId) {
-    if (model instanceof BaseMongoAuditableEntity item) {
-      return item.getCreatedById() == userId || item.getUpdatedById() == userId;
+    return this.isAccessible(model, Long.valueOf(userId));
+  }
+
+  public boolean isAccessible(TModel model, Object user) {
+    if (model instanceof BaseMongoAuditableEntity<?> item) {
+      return Objects.equals(item.getCreatedBy(), user) || Objects.equals(item.getUpdatedBy(), user);
     }
     return false;
   }
@@ -208,10 +216,14 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
    * Persists a single entity in the repository.
    */
   public Future<Optional<TModel>> createOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options) {
+    if (options.getUser() == null && BaseMongoAuditableEntity.class.isAssignableFrom(this.modelType)) {
+      return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating a record."));
+    }
+
     item.setUid(UUID.randomUUID());
     if (item instanceof BaseMongoAuditableEntity ae) {
-      ae.setCreatedById(options.getUserId());
-      ae.setUpdatedById(options.getUserId());
+      ae.setCreatedBy(options.getUser());
+      ae.setUpdatedBy(options.getUser());
     }
     JsonObject json = JsonObject.mapFrom(item);
     return mongoClient.insert(collectionName, json)
@@ -226,6 +238,9 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
    */
   public Future<List<TModel>> createMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options) {
     if (items.isEmpty()) return Future.succeededFuture(items);
+    if (options.getUser() == null && BaseMongoAuditableEntity.class.isAssignableFrom(this.modelType)) {
+      return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating many records."));
+    }
 
     List<BulkOperation> operations = items.stream().map(item -> {
       if (item.getId() == null) {
@@ -233,8 +248,8 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
       }
       item.setUid(UUID.randomUUID());
       if (item instanceof BaseMongoAuditableEntity ae) {
-        ae.setCreatedById(options.getUserId());
-        ae.setUpdatedById(options.getUserId());
+        ae.setCreatedBy(options.getUser());
+        ae.setUpdatedBy(options.getUser());
       }
       return BulkOperation.createInsert(JsonObject.mapFrom(item));
     }).collect(Collectors.toList());
@@ -264,12 +279,16 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
    * Updates a single entity in the repository by its primary key identifier.
    */
   public Future<Optional<TModel>> updateById(String id, @NotNull ChangeEffectorFunction<TModel> valueChanger, @NotNull RepositoryOptions<TModel> options) {
+    if (options.getUser() == null && BaseMongoAuditableEntity.class.isAssignableFrom(this.modelType)) {
+      return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when updating a record."));
+    }
+
     return getById(id).compose(opt -> {
       if (opt.isEmpty()) return Future.succeededFuture(Optional.empty());
       TModel item = opt.get();
       if (valueChanger.change(mongoClient, item)) {
         if (item instanceof BaseMongoAuditableEntity ae) {
-          ae.setUpdatedById(options.getUserId());
+          ae.setUpdatedBy(options.getUser());
         }
         JsonObject json = JsonObject.mapFrom(item);
         json.remove("_id");
@@ -284,12 +303,16 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
    * Updates multiple records in the repository that match the provided filter criteria.
    */
   public Future<ChangeResultModel<TModel>> updateMany(@Nullable MongoQueryData<TModel> filter, @NotNull ChangeEffectorFunction<TModel> valueChanger, @NotNull RepositoryOptions<TModel> options) {
+    if (options.getUser() == null && BaseMongoAuditableEntity.class.isAssignableFrom(this.modelType)) {
+      return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when updating many records."));
+    }
+
     return getMany(filter, options).compose(items -> {
       List<TModel> changedItems = new ArrayList<>();
       for (TModel item : items) {
         if (valueChanger.change(mongoClient, item)) {
           if (item instanceof BaseMongoAuditableEntity ae) {
-            ae.setUpdatedById(options.getUserId());
+            ae.setUpdatedBy(options.getUser());
           }
           changedItems.add(item);
         }
@@ -314,12 +337,16 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
    * Updates a single entity in the repository that matches the provided filter criteria.
    */
   public Future<Optional<TModel>> updateOne(@Nullable MongoQueryData<TModel> filter, @NotNull ChangeEffectorFunction<TModel> valueChanger, @NotNull RepositoryOptions<TModel> options) {
+    if (options.getUser() == null && BaseMongoAuditableEntity.class.isAssignableFrom(this.modelType)) {
+      return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when updating a record."));
+    }
+
     return getOne(filter, options).compose(opt -> {
       if (opt.isEmpty()) return Future.succeededFuture(Optional.empty());
       TModel item = opt.get();
       if (valueChanger.change(mongoClient, item)) {
         if (item instanceof BaseMongoAuditableEntity ae) {
-          ae.setUpdatedById(options.getUserId());
+          ae.setUpdatedBy(options.getUser());
         }
         JsonObject json = JsonObject.mapFrom(item);
         json.remove("_id");

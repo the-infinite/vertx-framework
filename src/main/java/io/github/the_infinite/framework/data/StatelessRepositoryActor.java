@@ -99,19 +99,19 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
 
       transactionFuture.andThen(transactionResult -> {
         final Runnable completeTransaction = () -> {
-        try {
-          if (transactionResult.failed()) {
-            tx.markForRollback();
-            em.fail(transactionResult.cause());
-            return;
-          }
+          try {
+            if (transactionResult.failed()) {
+              tx.markForRollback();
+              em.fail(transactionResult.cause());
+              return;
+            }
 
-          //? Something about this is beautiful.
-          em.complete(transactionResult.result());
-        } catch (Throwable t) {
-          tx.markForRollback();
-          em.fail(t);
-        }
+            //? Something about this is beautiful.
+            em.complete(transactionResult.result());
+          } catch (Throwable t) {
+            tx.markForRollback();
+            em.fail(t);
+          }
         };
 
         if (context != null && Vertx.currentContext() != context) {
@@ -211,25 +211,25 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
                                          @NotNull RepositoryOptions<TModel> options,
                                          @Nullable Mutiny.StatelessSession transaction) {
     //? Options are not allowed to be null here.
-    if (options.getUserId() < 1 && this.modelType.getSuperclass().equals(BaseAuditableEntity.class)) {
+    if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating many records."));
     }
 
     //? Now, run a query with that session.
     return this.getOrCreateSession(transaction,
       (session, _) -> session.insertAll(items.stream().peek(item -> {
-      item.setUid(UUID.randomUUID());
-      if (item instanceof BaseAuditableEntity ae) {
-        ae.setCreatedById(options.getUserId());
-        ae.setUpdatedById(options.getUserId());
-      }
-    }).toArray()).map(_ -> items));
+        item.setUid(UUID.randomUUID());
+        if (item instanceof BaseAuditableEntity ae) {
+          ae.setCreatedBy(options.getUser());
+          ae.setUpdatedBy(options.getUser());
+        }
+      }).toArray()).map(_ -> items));
   }
 
   @Override
   public Future<Optional<TModel>> createOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.StatelessSession transaction) {
     //? If options are not clearly defined...
-    if (options.getUserId() < 1 && this.modelType.getSuperclass().equals(BaseAuditableEntity.class)) {
+    if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating a record."));
     }
 
@@ -237,8 +237,8 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     return this.getOrCreateSession(transaction, (session, _) -> {
       item.setUid(UUID.randomUUID());
       if (item instanceof BaseAuditableEntity ae) {
-        ae.setCreatedById(options.getUserId());
-        ae.setUpdatedById(options.getUserId());
+        ae.setCreatedBy(options.getUser());
+        ae.setUpdatedBy(options.getUser());
       }
 
       //? Moving forward...
@@ -249,7 +249,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
   @Override
   public Future<ChangeResultModel<TModel>> updateMany(@Nullable QueryData<TModel> filter, @NotNull ChangeEffectorFunction<TModel, Mutiny.StatelessSession> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.StatelessSession transaction) {
     //? Options are not allowed to be null here.
-    if (options.getUserId() < 1 && this.modelType.getSuperclass().equals(BaseAuditableEntity.class)) {
+    if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when updating many records."));
     }
 
@@ -259,14 +259,14 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
 
     //? Now, run a query with that session.
-    return this.getOrCreateTransaction(transaction, (session, _) -> session.createQuery(usedFilters.select().query())      .setCacheMode(CacheMode.IGNORE).setCacheable(false).setMaxResults(usedLimit).getResultList().chain(data -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setCacheMode(CacheMode.IGNORE).setCacheable(false).setMaxResults(usedLimit).getResultList().chain(data -> {
       final var changeList = new ArrayList<TModel>();
 
       //? Change each entity herein.
       for (final var entity : data) {
         if (valueChanger.change(session, entity)) {
           if (entity instanceof BaseAuditableEntity ae) {
-            ae.setUpdatedById(options.getUserId());
+            ae.setUpdatedBy(options.getUser());
           }
           changeList.add(entity);
         }
@@ -289,7 +289,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
 
     //? Options are not allowed to be null here.
-    if (options.getUserId() < 1 && this.modelType.getSuperclass().equals(BaseAuditableEntity.class)) {
+    if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when updating a record."));
     }
 
@@ -310,7 +310,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
         }
 
         if (entity instanceof BaseAuditableEntity ae) {
-          ae.setUpdatedById(options.getUserId());
+          ae.setUpdatedBy(options.getUser());
         }
 
         return session.update(entity).map(_ -> Optional.of(entity));
@@ -320,7 +320,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
   @Override
   public Future<Optional<TModel>> updateById(long id, @NotNull ChangeEffectorFunction<TModel, Mutiny.StatelessSession> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.StatelessSession transaction) {
     //? Options are not allowed to be null here.
-    if (options.getUserId() < 1 && this.modelType.getSuperclass().equals(BaseAuditableEntity.class)) {
+    if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when updating a record."));
     }
 
@@ -336,7 +336,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
         }
 
         if (data instanceof BaseAuditableEntity ae) {
-          ae.setUpdatedById(options.getUserId());
+          ae.setUpdatedBy(options.getUser());
         }
 
         return session.update(data).map(_ -> Optional.of(data));

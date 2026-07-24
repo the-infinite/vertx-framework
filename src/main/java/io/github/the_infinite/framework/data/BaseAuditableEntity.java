@@ -1,30 +1,37 @@
 package io.github.the_infinite.framework.data;
 
-import jakarta.persistence.Column;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.MappedSuperclass;
+import lombok.Getter;
 
+@Getter
 @MappedSuperclass
 @SuppressWarnings("unused")
-public class BaseAuditableEntity extends BaseEntity {
-    @Column(nullable = false, updatable = false)
-    private long createdById;
+public class BaseAuditableEntity<TUser> extends BaseEntity {
+  @ManyToOne(optional = false)
+  @JoinColumn(nullable = false, updatable = false)
+  private TUser createdBy;
 
-    @Column(nullable = false)
-    private long updatedById;
+  @ManyToOne(optional = false)
+  @JoinColumn(nullable = false)
+  private TUser updatedBy;
 
-    public long getCreatedById() {
-        return createdById;
+  void setCreatedBy(TUser createdBy) {
+    if (createdBy instanceof BaseEntity) {
+      this.createdBy = createdBy;
+      return;
     }
 
-    void setCreatedById(long createdById) {
-        this.createdById = createdById;
+    throw new IllegalArgumentException("Created by must be a BaseEntity");
+  }
+
+  void setUpdatedBy(TUser updatedBy) {
+    if (updatedBy instanceof BaseEntity) {
+      this.updatedBy = updatedBy;
+      return;
     }
 
-    public long getUpdatedById() {
-        return updatedById;
-    }
-
-    void setUpdatedById(long updatedById) {
-        this.updatedById = updatedById;
-    }
+    throw new IllegalArgumentException("Updated by must be a BaseEntity");
+  }
 }

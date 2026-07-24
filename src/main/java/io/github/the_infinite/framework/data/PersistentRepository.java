@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -91,10 +92,13 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param userId The user ID to check against.
    */
   public boolean isOwner(TModel item, long userId) {
-    if (item instanceof BaseAuditableEntity ae) {
-      return ae.getCreatedById() == userId;
-    }
+    return this.isOwner(item, Long.valueOf(userId));
+  }
 
+  public boolean isOwner(TModel item, Object user) {
+    if (item instanceof BaseAuditableEntity<?> ae) {
+      return Objects.equals(ae.getCreatedBy(), user);
+    }
     return false;
   }
 
@@ -145,10 +149,13 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @return A future that resolves to true if the user has access to the item, false otherwise.
    */
   public boolean isAccessible(TModel model, long userId) {
-    if (model instanceof BaseAuditableEntity item) {
-      return item.getCreatedById() == userId || item.getUpdatedById() == userId;
-    }
+    return this.isAccessible(model, Long.valueOf(userId));
+  }
 
+  public boolean isAccessible(TModel model, Object user) {
+    if (model instanceof BaseAuditableEntity<?> item) {
+      return Objects.equals(item.getCreatedBy(), user) || Objects.equals(item.getUpdatedBy(), user);
+    }
     return false;
   }
 
