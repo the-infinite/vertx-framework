@@ -35,11 +35,11 @@ public final class RepositoryOptions<T> {
   }
 
   public RepositoryOptions(CorrelationContext context) {
-    this((Object) null, context);
+    this(null, context);
   }
 
   public RepositoryOptions() {
-    this((Object) null, null);
+    this(null, null);
   }
 
   public RepositoryOptions<T> setUser(Object user) {

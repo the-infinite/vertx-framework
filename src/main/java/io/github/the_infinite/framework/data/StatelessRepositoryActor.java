@@ -219,7 +219,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     return this.getOrCreateSession(transaction,
       (session, _) -> session.insertAll(items.stream().peek(item -> {
         item.setUid(UUID.randomUUID());
-        if (item instanceof BaseAuditableEntity ae) {
+        if (item instanceof BaseAuditableEntity<?> ae) {
           ae.setCreatedBy(options.getUser());
           ae.setUpdatedBy(options.getUser());
         }
@@ -236,7 +236,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     //? Now, run a query with that session.
     return this.getOrCreateSession(transaction, (session, _) -> {
       item.setUid(UUID.randomUUID());
-      if (item instanceof BaseAuditableEntity ae) {
+      if (item instanceof BaseAuditableEntity<?> ae) {
         ae.setCreatedBy(options.getUser());
         ae.setUpdatedBy(options.getUser());
       }
@@ -265,7 +265,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
       //? Change each entity herein.
       for (final var entity : data) {
         if (valueChanger.change(session, entity)) {
-          if (entity instanceof BaseAuditableEntity ae) {
+          if (entity instanceof BaseAuditableEntity<?> ae) {
             ae.setUpdatedBy(options.getUser());
           }
           changeList.add(entity);
@@ -309,7 +309,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
           return Uni.createFrom().item(Optional.of(entity));
         }
 
-        if (entity instanceof BaseAuditableEntity ae) {
+        if (entity instanceof BaseAuditableEntity<?> ae) {
           ae.setUpdatedBy(options.getUser());
         }
 
@@ -335,7 +335,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
           return Uni.createFrom().item(Optional.of(data));
         }
 
-        if (data instanceof BaseAuditableEntity ae) {
+        if (data instanceof BaseAuditableEntity<?> ae) {
           ae.setUpdatedBy(options.getUser());
         }
 

@@ -3,6 +3,15 @@
   <component name="CopilotDiffPersistence">
     <option name="pendingDiffs">
       <map>
+        <entry key="/BaseAuditableEntity (snapshot).java">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="/BaseAuditableEntity (snapshot).java" />
+              <option name="originalContent" value="package io.github.the_infinite.framework.data;&#10;&#10;import jakarta.persistence.JoinColumn;&#10;import jakarta.persistence.ManyToOne;&#10;import jakarta.persistence.MappedSuperclass;&#10;import lombok.Getter;&#10;&#10;@Getter&#10;@MappedSuperclass&#10;@SuppressWarnings({&quot;unused&quot;, &quot;unchecked&quot;})&#10;public class BaseAuditableEntity&lt;TUser&gt; extends BaseEntity {&#10;  @ManyToOne(optional = false)&#10;  @JoinColumn(name = &quot;createdById&quot;, nullable = false, updatable = false)&#10;  private TUser createdBy;&#10;&#10;  @ManyToOne(optional = false)&#10;  @JoinColumn(name = &quot;updatedById&quot;, nullable = false)&#10;  private TUser updatedBy;&#10;&#10;  void setCreatedBy(Object createdBy) {&#10;    if (createdBy instanceof BaseEntity) {&#10;      this.createdBy = (TUser) createdBy;&#10;      return;&#10;    }&#10;&#10;    throw new IllegalArgumentException(&quot;Created by must be a BaseEntity&quot;);&#10;  }&#10;&#10;  void setUpdatedBy(Object updatedBy) {&#10;    if (updatedBy instanceof BaseEntity) {&#10;      this.updatedBy = (TUser) updatedBy;&#10;      return;&#10;    }&#10;&#10;    throw new IllegalArgumentException(&quot;Updated by must be a BaseEntity&quot;);&#10;  }&#10;}&#10;" />
+              <option name="updatedContent" value="package io.github.the_infinite.framework.data;&#10;&#10;import jakarta.persistence.FetchType;&#10;import jakarta.persistence.JoinColumn;&#10;import jakarta.persistence.ManyToOne;&#10;import jakarta.persistence.MappedSuperclass;&#10;import lombok.Getter;&#10;&#10;@Getter&#10;@MappedSuperclass&#10;@SuppressWarnings({&quot;unused&quot;, &quot;unchecked&quot;})&#10;public class BaseAuditableEntity&lt;TUser&gt; extends BaseEntity {&#10;  @ManyToOne(fetch = FetchType.LAZY, optional = false)&#10;  @JoinColumn(name = &quot;created_by&quot;, nullable = false, updatable = false)&#10;  private TUser createdBy;&#10;&#10;  @ManyToOne(fetch = FetchType.LAZY, optional = false)&#10;  @JoinColumn(name = &quot;updated_by&quot;, nullable = false)&#10;  private TUser updatedBy;&#10;&#10;  void setCreatedBy(Object createdBy) {&#10;    this.createdBy = (TUser) createdBy;&#10;  }&#10;&#10;  void setUpdatedBy(Object updatedBy) {&#10;    this.updatedBy = (TUser) updatedBy;&#10;  }&#10;}&#10;" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
         <entry key="/ClassicHttpClient (snapshot).java">
           <value>
             <PendingDiffInfo>

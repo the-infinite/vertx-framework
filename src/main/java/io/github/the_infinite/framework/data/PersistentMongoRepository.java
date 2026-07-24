@@ -221,7 +221,7 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
     }
 
     item.setUid(UUID.randomUUID());
-    if (item instanceof BaseMongoAuditableEntity ae) {
+    if (item instanceof BaseMongoAuditableEntity<?> ae) {
       ae.setCreatedBy(options.getUser());
       ae.setUpdatedBy(options.getUser());
     }
@@ -247,7 +247,7 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
         item.setId(new ObjectId().toHexString());
       }
       item.setUid(UUID.randomUUID());
-      if (item instanceof BaseMongoAuditableEntity ae) {
+      if (item instanceof BaseMongoAuditableEntity<?> ae) {
         ae.setCreatedBy(options.getUser());
         ae.setUpdatedBy(options.getUser());
       }
@@ -287,7 +287,7 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
       if (opt.isEmpty()) return Future.succeededFuture(Optional.empty());
       TModel item = opt.get();
       if (valueChanger.change(mongoClient, item)) {
-        if (item instanceof BaseMongoAuditableEntity ae) {
+        if (item instanceof BaseMongoAuditableEntity<?> ae) {
           ae.setUpdatedBy(options.getUser());
         }
         JsonObject json = JsonObject.mapFrom(item);
@@ -311,7 +311,7 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
       List<TModel> changedItems = new ArrayList<>();
       for (TModel item : items) {
         if (valueChanger.change(mongoClient, item)) {
-          if (item instanceof BaseMongoAuditableEntity ae) {
+          if (item instanceof BaseMongoAuditableEntity<?> ae) {
             ae.setUpdatedBy(options.getUser());
           }
           changedItems.add(item);
@@ -345,7 +345,7 @@ public final class PersistentMongoRepository<TModel extends BaseMongoEntity, TMo
       if (opt.isEmpty()) return Future.succeededFuture(Optional.empty());
       TModel item = opt.get();
       if (valueChanger.change(mongoClient, item)) {
-        if (item instanceof BaseMongoAuditableEntity ae) {
+        if (item instanceof BaseMongoAuditableEntity<?> ae) {
           ae.setUpdatedBy(options.getUser());
         }
         JsonObject json = JsonObject.mapFrom(item);

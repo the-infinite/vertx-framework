@@ -125,59 +125,65 @@ public class DocumentationController extends RouteController {
 
     html.append("<!DOCTYPE html><html><head><title>API Documentation</title>");
     html.append("<meta name='viewport' content='width=device-width, initial-scale=1'>");
-    html.append("<style>")
-      .append(".swagger-ui { --swagger-blue: #61affe; --swagger-green: #49cc90; --swagger-orange: #fca130; --swagger-red: #f93e3e; --swagger-cyan: #50e3c2; --swagger-ink: #3b4151; --swagger-muted: #6b7280; --swagger-border: #d9dee7; --swagger-surface: #fff; --swagger-surface-2: #f8fafc; --swagger-shadow: 0 10px 32px rgba(15, 23, 42, 0.08); background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%); color: var(--swagger-ink); min-height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }")
-      .append(".swagger-ui .page-shell { max-width: 1200px; margin: 0 auto; padding: 2rem 1rem 3rem; }")
-      .append(".swagger-ui h1 { color: #213547; font-size: clamp(2rem, 4vw, 2.6rem); letter-spacing: -0.03em; margin: 0 0 1rem; }")
-      .append(".swagger-ui h2, .swagger-ui h3, .swagger-ui h4 { color: var(--swagger-ink); margin-top: 0; }")
-      .append(".swagger-ui h2 { font-size: 1.35rem; margin-bottom: 0.75rem; }")
-      .append(".swagger-ui h3 { font-size: 1.1rem; margin-bottom: 0.6rem; }")
-      .append(".swagger-ui h4 { margin-top: 1.25rem; margin-bottom: 0.6rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #5b6472; }")
-      .append(".swagger-ui .global-settings, .swagger-ui .route, .swagger-ui .try-it-out, .swagger-ui .test-result { background: var(--swagger-surface); border: 1px solid var(--swagger-border); border-radius: 12px; box-shadow: var(--swagger-shadow); }")
-      .append(".swagger-ui .global-settings { padding: 1.5rem; margin-bottom: 1.5rem; }")
-      .append(".swagger-ui .controller-section { margin-bottom: 2rem; }")
-      .append(".swagger-ui .controller-name { background: linear-gradient(180deg, #eff4fb, #e9eef7); padding: 0.9rem 1.2rem; border: 1px solid var(--swagger-border); border-radius: 12px 12px 0 0; border-bottom: none; font-size: 1.05rem; font-weight: 700; color: #2f3b52; }")
-      .append(".swagger-ui details.route { margin: 0; overflow: hidden; border-left: 5px solid var(--route-accent, var(--swagger-blue)); }")
-      .append(".swagger-ui .route:not(:last-child) { border-bottom: none; }")
-      .append(".swagger-ui .route-summary { padding: 1rem 1.1rem; cursor: pointer; display: flex; align-items: center; gap: 0.85rem; background: #fff; transition: background 0.2s ease, box-shadow 0.2s ease; }")
-      .append(".swagger-ui .route-summary:hover { background: #f8fbff; }")
-      .append(".swagger-ui .route[open] .route-summary { border-bottom: 1px solid #e6edf7; background: #f8fbff; }")
-      .append(".swagger-ui .method { font-size: 0.78rem; padding: 0.45rem 0.75rem; border-radius: 999px; color: #fff; font-weight: 800; min-width: 88px; text-align: center; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }")
-      .append(".swagger-ui .method-GET { background-color: #61affe; }")
-      .append(".swagger-ui .method-POST { background-color: #49cc90; }")
-      .append(".swagger-ui .method-PUT { background-color: #fca130; }")
-      .append(".swagger-ui .method-DELETE { background-color: #f93e3e; }")
-      .append(".swagger-ui .method-PATCH { background-color: #50e3c2; color: #17313a; }")
-      .append(".swagger-ui .route-get { --route-accent: #61affe; } .swagger-ui .route-post { --route-accent: #49cc90; } .swagger-ui .route-put { --route-accent: #fca130; } .swagger-ui .route-delete { --route-accent: #f93e3e; } .swagger-ui .route-patch { --route-accent: #50e3c2; }")
-      .append(".swagger-ui .path { font-family: 'Fira Code', 'Courier New', monospace; font-weight: 700; font-size: 1rem; color: #303133; word-break: break-all; }")
-      .append(".swagger-ui .name { margin-left: auto; font-size: 0.9rem; color: #7c8594; font-weight: 500; }")
-      .append(".swagger-ui .route-details { padding: 1.35rem 1.1rem 1.5rem; background: #fff; }")
-      .append(".swagger-ui .route-details p { color: var(--swagger-ink); margin: 0.35rem 0; }")
-      .append(".swagger-ui pre { background: #1f2937; color: #e5e7eb; padding: 1rem 1.1rem; border-radius: 10px; overflow-x: auto; font-size: 0.9rem; margin: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }")
-      .append(".swagger-ui code { background: #edf2f7; color: #2f3b52; padding: 0.2rem 0.45rem; border-radius: 6px; font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.95em; }")
-      .append(".swagger-ui ul { list-style: none; padding-left: 0; margin: 0.25rem 0 0; }")
-      .append(".swagger-ui li { margin-bottom: 0.5rem; }")
-      .append(".swagger-ui .try-it-out { margin-top: 1.5rem; padding: 1.25rem; background: linear-gradient(180deg, #ffffff, #fbfcfe); }")
-      .append(".swagger-ui .body-editor { margin-top: 1rem; }")
-      .append(".swagger-ui .body-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.65rem; }")
-      .append(".swagger-ui .body-editor__header h4 { margin: 0; }")
-      .append(".swagger-ui .body-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }")
-      .append(".swagger-ui .utility-btn, .swagger-ui .execute-btn { appearance: none; border: 1px solid transparent; border-radius: 8px; cursor: pointer; font-weight: 700; transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.2s ease, border-color 0.2s ease; }")
-      .append(".swagger-ui .utility-btn { background: #fff; border-color: #cfd7e3; color: #334155; padding: 0.55rem 0.8rem; font-size: 0.85rem; }")
-      .append(".swagger-ui .utility-btn:hover { background: #f8fbff; border-color: #aab8cf; box-shadow: 0 6px 14px rgba(15,23,42,0.08); }")
-      .append(".swagger-ui .utility-btn--primary { border-color: #61affe; color: #1e63b7; }")
-      .append(".swagger-ui .utility-btn--secondary { border-color: #dbe2ec; color: #475569; }")
-      .append(".swagger-ui .test-input { width: 100%; padding: 0.7rem 0.8rem; border: 1px solid #d3dae6; border-radius: 8px; margin-bottom: 0.65rem; font-family: inherit; box-sizing: border-box; background: #fff; color: #1f2937; box-shadow: inset 0 1px 2px rgba(15,23,42,0.04); }")
-      .append(".swagger-ui .test-input:focus { outline: none; border-color: #61affe; box-shadow: 0 0 0 3px rgba(97,174,254,0.16); }")
-      .append(".swagger-ui .request-body-input { min-height: 190px; resize: vertical; font-family: 'Fira Code', 'Courier New', monospace; background: #fcfdff; }")
-      .append(".swagger-ui .execute-btn { background: linear-gradient(180deg, #61affe, #4990e2); color: #fff; padding: 0.75rem 1.15rem; margin-top: 1rem; box-shadow: 0 8px 18px rgba(73,144,226,.24); }")
-      .append(".swagger-ui .execute-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(73,144,226,.3); }")
-      .append(".swagger-ui .test-result { margin-top: 1.25rem; padding: 1rem; background: #f8fafc; border-radius: 10px; border: 1px solid #e2e8f0; display: none; }")
-      .append(".swagger-ui .result-header { font-weight: 800; margin-bottom: 0.75rem; color: #213547; }")
-      .append(".swagger-ui select { background: #fff; border: 1px solid #cfd7e3; border-radius: 8px; color: #334155; padding: 0.65rem 2.25rem 0.65rem 0.85rem; box-shadow: inset 0 1px 2px rgba(15,23,42,0.04); }")
-      .append(".swagger-ui textarea { min-height: 180px; }")
-      .append("@media (max-width: 768px) { .swagger-ui .page-shell { padding: 1rem; } .swagger-ui .route-summary { flex-direction: column; align-items: flex-start; } .swagger-ui .method { min-width: auto; width: 100%; margin-bottom: 0.25rem; } .swagger-ui .name { margin-left: 0; } .swagger-ui .body-editor__header { align-items: flex-start; flex-direction: column; } }")
-      .append("</style></head><body class='swagger-ui'><div class='page-shell'>");
+     html.append("<style>")
+       .append(".swagger-ui { --swagger-blue: #61affe; --swagger-green: #49cc90; --swagger-orange: #fca130; --swagger-red: #f93e3e; --swagger-cyan: #50e3c2; --swagger-ink: #3b4151; --swagger-muted: #6b7280; --swagger-border: #d9dee7; --swagger-surface: #fff; --swagger-surface-2: #f8fafc; --swagger-shadow: 0 10px 32px rgba(15, 23, 42, 0.08); background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%); color: var(--swagger-ink); min-height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }")
+       .append(".swagger-ui .page-shell { max-width: 1200px; margin: 0 auto; padding: 2rem 1rem 3rem; }")
+       .append(".swagger-ui h1 { color: #213547; font-size: clamp(2rem, 4vw, 2.6rem); letter-spacing: -0.03em; margin: 0 0 1rem; }")
+       .append(".swagger-ui h2, .swagger-ui h3, .swagger-ui h4 { color: var(--swagger-ink); margin-top: 0; }")
+       .append(".swagger-ui h2 { font-size: 1.35rem; margin-bottom: 0.75rem; }")
+       .append(".swagger-ui h3 { font-size: 1.1rem; margin-bottom: 0.6rem; }")
+       .append(".swagger-ui h4 { margin-top: 1.25rem; margin-bottom: 0.6rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #5b6472; }")
+       .append(".swagger-ui .global-settings, .swagger-ui .route, .swagger-ui .try-it-out, .swagger-ui .test-result { background: var(--swagger-surface); border: 1px solid var(--swagger-border); border-radius: 12px; box-shadow: var(--swagger-shadow); }")
+       .append(".swagger-ui .global-settings { padding: 1.5rem; margin-bottom: 1.5rem; }")
+       .append(".swagger-ui .controller-section { margin-bottom: 2rem; }")
+       .append(".swagger-ui .controller-name { background: linear-gradient(180deg, #eff4fb, #e9eef7); padding: 0.9rem 1.2rem; border: 1px solid var(--swagger-border); border-radius: 12px 12px 0 0; border-bottom: none; font-size: 1.05rem; font-weight: 700; color: #2f3b52; }")
+       .append(".swagger-ui details.route { margin: 0; overflow: hidden; border-left: 5px solid var(--route-accent, var(--swagger-blue)); }")
+       .append(".swagger-ui .route:not(:last-child) { border-bottom: none; }")
+       .append(".swagger-ui .route-summary { padding: 1rem 1.1rem; cursor: pointer; display: flex; align-items: center; gap: 0.85rem; background: #fff; transition: background 0.2s ease, box-shadow 0.2s ease; }")
+       .append(".swagger-ui .route-summary:hover { background: #f8fbff; }")
+       .append(".swagger-ui .route[open] .route-summary { border-bottom: 1px solid #e6edf7; background: #f8fbff; }")
+       .append(".swagger-ui .method { font-size: 0.78rem; padding: 0.45rem 0.75rem; border-radius: 999px; color: #fff; font-weight: 800; min-width: 88px; text-align: center; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }")
+       .append(".swagger-ui .method-GET { background-color: #61affe; }")
+       .append(".swagger-ui .method-POST { background-color: #49cc90; }")
+       .append(".swagger-ui .method-PUT { background-color: #fca130; }")
+       .append(".swagger-ui .method-DELETE { background-color: #f93e3e; }")
+       .append(".swagger-ui .method-PATCH { background-color: #50e3c2; color: #17313a; }")
+       .append(".swagger-ui .route-get { --route-accent: #61affe; } .swagger-ui .route-post { --route-accent: #49cc90; } .swagger-ui .route-put { --route-accent: #fca130; } .swagger-ui .route-delete { --route-accent: #f93e3e; } .swagger-ui .route-patch { --route-accent: #50e3c2; }")
+       .append(".swagger-ui .path { font-family: 'Fira Code', 'Courier New', monospace; font-weight: 700; font-size: 1rem; color: #303133; word-break: break-all; }")
+       .append(".swagger-ui .name { margin-left: auto; font-size: 0.9rem; color: #7c8594; font-weight: 500; }")
+       .append(".swagger-ui .route-details { padding: 1.35rem 1.1rem 1.5rem; background: #fff; }")
+       .append(".swagger-ui .route-details p { color: var(--swagger-ink); margin: 0.35rem 0; }")
+       .append(".swagger-ui pre { background: #1f2937; color: #e5e7eb; padding: 1rem 1.1rem; border-radius: 10px; overflow-x: auto; font-size: 0.9rem; margin: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); line-height: 1.5; }")
+       .append(".swagger-ui code { background: #edf2f7; color: #2f3b52; padding: 0.2rem 0.45rem; border-radius: 6px; font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.95em; }")
+       .append(".swagger-ui ul { list-style: none; padding-left: 0; margin: 0.25rem 0 0; }")
+       .append(".swagger-ui li { margin-bottom: 0.5rem; }")
+       .append(".swagger-ui .try-it-out { margin-top: 1.5rem; padding: 1.25rem; background: linear-gradient(180deg, #ffffff, #fbfcfe); }")
+       .append(".swagger-ui .body-editor { margin-top: 1rem; }")
+       .append(".swagger-ui .body-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.65rem; }")
+       .append(".swagger-ui .body-editor__header h4 { margin: 0; }")
+       .append(".swagger-ui .body-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }")
+       .append(".swagger-ui .utility-btn, .swagger-ui .execute-btn { appearance: none; border: 1px solid transparent; border-radius: 8px; cursor: pointer; font-weight: 700; transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.2s ease, border-color 0.2s ease; }")
+       .append(".swagger-ui .utility-btn { background: #fff; border-color: #cfd7e3; color: #334155; padding: 0.55rem 0.8rem; font-size: 0.85rem; }")
+       .append(".swagger-ui .utility-btn:hover { background: #f8fbff; border-color: #aab8cf; box-shadow: 0 6px 14px rgba(15,23,42,0.08); }")
+       .append(".swagger-ui .utility-btn--primary { border-color: #61affe; color: #1e63b7; }")
+       .append(".swagger-ui .utility-btn--secondary { border-color: #dbe2ec; color: #475569; }")
+       .append(".swagger-ui .test-input { width: 100%; padding: 0.7rem 0.8rem; border: 1px solid #d3dae6; border-radius: 8px; margin-bottom: 0.65rem; font-family: inherit; box-sizing: border-box; background: #fff; color: #1f2937; box-shadow: inset 0 1px 2px rgba(15,23,42,0.04); }")
+       .append(".swagger-ui .test-input:focus { outline: none; border-color: #61affe; box-shadow: 0 0 0 3px rgba(97,174,254,0.16); }")
+       .append(".swagger-ui .request-body-input { min-height: 190px; resize: vertical; font-family: 'Fira Code', 'Courier New', monospace; background: #fcfdff; color: #1f2937; line-height: 1.5; }")
+       .append(".swagger-ui .execute-btn { background: linear-gradient(180deg, #61affe, #4990e2); color: #fff; padding: 0.75rem 1.15rem; margin-top: 1rem; box-shadow: 0 8px 18px rgba(73,144,226,.24); }")
+       .append(".swagger-ui .execute-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(73,144,226,.3); }")
+       .append(".swagger-ui .test-result { margin-top: 1.25rem; padding: 1rem; background: #f8fafc; border-radius: 10px; border: 1px solid #e2e8f0; display: none; }")
+       .append(".swagger-ui .result-header { font-weight: 800; margin-bottom: 0.75rem; color: #213547; }")
+       .append(".swagger-ui select { background: #fff; border: 1px solid #cfd7e3; border-radius: 8px; color: #334155; padding: 0.65rem 2.25rem 0.65rem 0.85rem; box-shadow: inset 0 1px 2px rgba(15,23,42,0.04); }")
+       .append(".swagger-ui textarea { min-height: 180px; }")
+       .append(".json-key { color: #9cdcfe; }")
+       .append(".json-string { color: #ce9178; }")
+       .append(".json-number { color: #b5cea8; }")
+       .append(".json-boolean { color: #569cd6; }")
+       .append(".json-null { color: #569cd6; font-style: italic; }")
+       .append(".json-punctuation { color: #d4d4d4; }")
+       .append("@media (max-width: 768px) { .swagger-ui .page-shell { padding: 1rem; } .swagger-ui .route-summary { flex-direction: column; align-items: flex-start; } .swagger-ui .method { min-width: auto; width: 100%; margin-bottom: 0.25rem; } .swagger-ui .name { margin-left: 0; } .swagger-ui .body-editor__header { align-items: flex-start; flex-direction: column; } }")
+       .append("</style></head><body class='swagger-ui'><div class='page-shell'>");
 
     html.append("<h1>API Documentation</h1>");
 
@@ -536,21 +542,59 @@ public class DocumentationController extends RouteController {
         }
       }
 
-      function formatResponseBody(body) {
-        if (body == null || body === '') {
-          return '';
-        }
+       function formatResponseBody(body) {
+         if (body == null || body === '') {
+           return '';
+         }
 
-        if (typeof body === 'string') {
-          try {
-            return JSON.stringify(JSON.parse(body), null, 2);
-          } catch (error) {
-            return body;
-          }
-        }
+         if (typeof body === 'string') {
+           try {
+             return JSON.stringify(JSON.parse(body), null, 2);
+           } catch (error) {
+             return body;
+           }
+         }
 
-        return JSON.stringify(body, null, 2);
-      }
+         return JSON.stringify(body, null, 2);
+       }
+
+       function highlightJSON(jsonString) {
+         if (!jsonString) return '';
+
+         // Escape HTML entities first
+         jsonString = jsonString
+           .replace(/&/g, '&amp;')
+           .replace(/</g, '&lt;')
+           .replace(/>/g, '&gt;');
+
+         // Match JSON patterns with proper ordering
+         const json = jsonString.replace(/(\"(?:\\\\.|[^\"\\\\])*\")|(\b(?:true|false|null)\b)|(\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\b)|([{}[\\]:,])|(\s+)/g, function(match, string, literal, number, punctuation, whitespace) {
+           if (string) {
+             // Check if this is a key (followed by :) or a string value
+             return '<span class="json-key">' + match + '</span>';
+           }
+           if (literal) {
+             return '<span class="json-' + match + '">' + match + '</span>';
+           }
+           if (number) {
+             return '<span class="json-number">' + match + '</span>';
+           }
+           if (punctuation) {
+             return '<span class="json-punctuation">' + match + '</span>';
+           }
+           if (whitespace) {
+             return match;
+           }
+           return match;
+         });
+
+         // Post-process to differentiate between keys and strings
+         return json.replace(/<span class="json-key">(\"[^\"]*\")<\\/span>(\s*:<\\s*)/g, function(match, key, colon) {
+           return '<span class="json-key">' + key + '</span>' + colon;
+         }).replace(/<span class="json-key">(\"[^\"]*\")<\\/span>(?![\\s:]*:)/g, function(match, str) {
+           return '<span class="json-string">' + str + '</span>';
+         });
+       }
 
       function getSelectedClientName() {
         const clientSelect = document.getElementById('client-select');
@@ -713,11 +757,24 @@ public class DocumentationController extends RouteController {
         pre.textContent = content;
       }
 
-      window.addEventListener('DOMContentLoaded', function() {
-        if (!IS_PRODUCTION) {
-          updateClient();
-        }
-      });
+       window.addEventListener('DOMContentLoaded', function() {
+         if (!IS_PRODUCTION) {
+           updateClient();
+         }
+
+         // Apply JSON syntax highlighting to example displays
+         document.querySelectorAll('pre[id^="ex-"]').forEach(function(pre) {
+           const content = pre.textContent;
+           try {
+             // Try to parse as JSON to ensure it's valid
+             JSON.parse(content);
+             // If valid, apply highlighting
+             pre.innerHTML = highlightJSON(content);
+           } catch (e) {
+             // If not valid JSON, leave as is
+           }
+         });
+       });
 
       function updateExample(sectionId, exampleIndex) {
         const items = document.querySelectorAll('.' + sectionId + '-item');
@@ -802,23 +859,23 @@ public class DocumentationController extends RouteController {
         resultDiv.style.display = 'block';
         resultDiv.innerHTML = '<div class="result-header">Executing...</div>';
 
-        try {
-          const data = await actor({
-            method,
-            url: finalUrl,
-            headers,
-            body: normalizeBody(requestBody),
-            parameters: getClientParameters(clientName)
-          });
+         try {
+           const data = await actor({
+             method,
+             url: finalUrl,
+             headers,
+             body: normalizeBody(requestBody),
+             parameters: getClientParameters(clientName)
+           });
 
-          let resultHtml = '<div class="result-header">Status: ' + data.statusCode + '</div>';
-          resultHtml += '<h4>Response Headers</h4><pre style="background:#272822; color:#f8f8f2; padding:1rem; border-radius:6px; overflow-x:auto;">' + JSON.stringify(data.headers ?? {}, null, 2) + '</pre>';
-          resultHtml += '<h4>Response Body</h4><pre style="background:#272822; color:#f8f8f2; padding:1rem; border-radius:6px; overflow-x:auto;">' + formatResponseBody(data.body) + '</pre>';
-          resultDiv.innerHTML = resultHtml;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          resultDiv.innerHTML = '<div style="color: red;">Error: ' + message + '</div>';
-        }
+           let resultHtml = '<div class="result-header">Status: ' + data.statusCode + '</div>';
+           resultHtml += '<h4>Response Headers</h4><pre style="background:#272822; color:#f8f8f2; padding:1rem; border-radius:6px; overflow-x:auto;">' + highlightJSON(JSON.stringify(data.headers ?? {}, null, 2)) + '</pre>';
+           resultHtml += '<h4>Response Body</h4><pre style="background:#272822; color:#f8f8f2; padding:1rem; border-radius:6px; overflow-x:auto;">' + highlightJSON(formatResponseBody(data.body)) + '</pre>';
+           resultDiv.innerHTML = resultHtml;
+         } catch (error) {
+           const message = error instanceof Error ? error.message : String(error);
+           resultDiv.innerHTML = '<div style="color: red;">Error: ' + message + '</div>';
+         }
       }
       </script>
       """.formatted(defaultClientId, Boolean.toString(isProduction),
@@ -901,45 +958,45 @@ public class DocumentationController extends RouteController {
     return cachedGroupedRoutes;
   }
 
-  private void appendExampleDisplay(StringBuilder html, DocumentableDTO dto) {
-    if (dto == null) return;
-    String sectionId = "ex-" + UUID.randomUUID().toString().substring(0, 8);
-    try {
-      String example = dto.toExample();
-      html.append("<pre id='").append(sectionId).append("-0' class='").append(sectionId).append("-item'>")
-        .append(escapeForHtml(example))
-        .append("</pre>");
-    } catch (Exception e) {
-      html.append("<pre>Could not generate example: ").append(escapeForHtml(e.getMessage())).append("</pre>");
-    }
-  }
+   private void appendExampleDisplay(StringBuilder html, DocumentableDTO dto) {
+     if (dto == null) return;
+     String sectionId = "ex-" + UUID.randomUUID().toString().substring(0, 8);
+     try {
+       String example = dto.toExample();
+       html.append("<pre id='").append(sectionId).append("-0' class='").append(sectionId).append("-item' style='white-space: pre-wrap; word-wrap: break-word;'>")
+         .append(escapeForHtml(example))
+         .append("</pre>");
+     } catch (Exception e) {
+       html.append("<pre>Could not generate example: ").append(escapeForHtml(e.getMessage())).append("</pre>");
+     }
+   }
 
-  private void appendExampleDisplay(StringBuilder html, Class<?> dtoClass) {
-    if (dtoClass == null) return;
-    html.append("<h4>").append("Request Body").append(" (").append(dtoClass.getSimpleName()).append(")</h4>");
-    Map<String, String> examples = getExamples(dtoClass);
-    String sectionId = "ex-" + UUID.randomUUID().toString().substring(0, 8);
+   private void appendExampleDisplay(StringBuilder html, Class<?> dtoClass) {
+     if (dtoClass == null) return;
+     html.append("<h4>").append("Request Body").append(" (").append(dtoClass.getSimpleName()).append(")</h4>");
+     Map<String, String> examples = getExamples(dtoClass);
+     String sectionId = "ex-" + UUID.randomUUID().toString().substring(0, 8);
 
-    if (examples.size() > 1) {
-      html.append("<div style='margin-bottom: 0.5rem;'>");
-      html.append("<label style='font-size: 0.8rem; color: #606266; margin-right: 0.5rem;'>Select Example:</label>");
-      html.append("<select onchange='updateExample(\"").append(sectionId).append("\", this.value)' style='padding: 0.2rem; font-size: 0.8rem; border-radius: 4px; border: 1px solid #dcdfe6;'>");
-      int optIndex = 0;
-      for (String name : examples.keySet()) {
-        html.append("<option value='").append(optIndex).append("'>").append(name).append("</option>");
-        optIndex++;
-      }
-      html.append("</select></div>");
-    }
+     if (examples.size() > 1) {
+       html.append("<div style='margin-bottom: 0.5rem;'>");
+       html.append("<label style='font-size: 0.8rem; color: #606266; margin-right: 0.5rem;'>Select Example:</label>");
+       html.append("<select onchange='updateExample(\"").append(sectionId).append("\", this.value)' style='padding: 0.2rem; font-size: 0.8rem; border-radius: 4px; border: 1px solid #dcdfe6;'>");
+       int optIndex = 0;
+       for (String name : examples.keySet()) {
+         html.append("<option value='").append(optIndex).append("'>").append(name).append("</option>");
+         optIndex++;
+       }
+       html.append("</select></div>");
+     }
 
-    int index = 0;
-    for (Map.Entry<String, String> entry : examples.entrySet()) {
-      html.append("<pre id='").append(sectionId).append("-").append(index).append("' class='").append(sectionId).append("-item' style='").append(index == 0 ? "" : "display: none;").append("'>")
-        .append(escapeForHtml(entry.getValue()))
-        .append("</pre>");
-      index++;
-    }
-  }
+     int index = 0;
+     for (Map.Entry<String, String> entry : examples.entrySet()) {
+       html.append("<pre id='").append(sectionId).append("-").append(index).append("' class='").append(sectionId).append("-item' style='").append(index == 0 ? "" : "display: none;").append(" white-space: pre-wrap; word-wrap: break-word;'>")
+         .append(escapeForHtml(entry.getValue()))
+         .append("</pre>");
+       index++;
+     }
+   }
 
   private Map<String, String> getExamples(Class<?> dtoClass) {
     Map<String, String> examples = new LinkedHashMap<>();
