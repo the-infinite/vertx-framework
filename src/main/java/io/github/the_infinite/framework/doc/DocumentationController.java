@@ -1322,7 +1322,7 @@ ${jsonIndent(depth)}${jsonPunctuation('}')}`;
      html.append("</div></div>");
      html.append("<script>");
      html.append("const DEFAULT_CLIENT_ID = '").append(defaultClientId).append("';");
-     html.append("const IS_PRODUCTION = ").append(Boolean.toString(isProduction)).append(";");
+     html.append("const IS_PRODUCTION = ").append(isProduction).append(";");
      html.append("function delay(ms) { return new Promise(resolve => window.setTimeout(resolve, ms)); }");
      html.append("function getRequestBodyTextarea(routeId) { return document.getElementById('body-' + routeId); }");
      html.append("function flashButton(button, label) { if (!button) return; const original = button.textContent; button.textContent = label; window.setTimeout(() => { button.textContent = original; }, 1100); }");
