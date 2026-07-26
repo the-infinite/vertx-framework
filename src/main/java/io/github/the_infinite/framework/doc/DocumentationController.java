@@ -210,7 +210,7 @@ public class DocumentationController extends RouteController {
     if (!isProduction && !availableHttpClients.isEmpty()) {
       html.append("<section class='global-settings'>");
       html.append("<h2>HTTP Client Settings</h2>");
-      html.append("<p>Select an HTTP client to see its usage snippet and configure parameters:</p>");
+      html.append("<p>Select an HTTP client and configure its parameters:</p>");
       html.append("<select id='client-select' onchange='updateClient()' style='padding: 0.5rem; width: 100%; max-width: 300px; margin-bottom: 1rem;'>");
       for (HttpClient client : availableHttpClients) {
         String clientVal = normalizeClientName(client.getName());
@@ -223,7 +223,6 @@ public class DocumentationController extends RouteController {
       for (HttpClient client : availableHttpClients) {
         String clientId = normalizeClientName(client.getName());
         html.append("<div id='snippet-").append(clientId).append("' class='client-snippet' style='display: none;'>");
-        html.append("<p><strong>Description:</strong> ").append(client.getDescription()).append("</p>");
 
         if (!client.getParameters().isEmpty()) {
           html.append("<h4>Parameters</h4>");
@@ -231,7 +230,7 @@ public class DocumentationController extends RouteController {
           for (HttpClientParameter param : client.getParameters()) {
             html.append("<div style='min-width: 200px;'>");
             html.append("<label style='display: block; font-size: 0.8rem; color: #606266;'>").append(param.label()).append(":</label>");
-            html.append("<input type='").append(param.type()).append("' class='client-param' data-param='").append(param.name()).append("' value='").append(param.defaultValue()).append("' oninput='updateClientSnippet(\"").append(clientId).append("\")' style='padding: 0.4rem; width: 100%; border: 1px solid #dcdfe6; border-radius: 4px;'>");
+            html.append("<input type='").append(param.type()).append("' class='client-param' data-param='").append(param.name()).append("' value='").append(param.defaultValue()).append("' style='padding: 0.4rem; width: 100%; border: 1px solid #dcdfe6; border-radius: 4px;'>");
             html.append("</div>");
           }
           html.append("</div>");
@@ -810,24 +809,7 @@ ${jsonIndent(depth)}${jsonPunctuation('}')}`;
           if (selectedSnippet) {
             selectedSnippet.style.display = 'block';
           }
-          updateClientSnippet(select.value);
         }
-      }
-
-      function updateClientSnippet(clientId) {
-        const snippetDiv = document.getElementById('snippet-' + clientId);
-        if (!snippetDiv) return;
-
-        const pre = document.getElementById('pre-' + clientId);
-        if (!pre) return;
-        let content = pre.getAttribute('data-template');
-        const inputs = snippetDiv.querySelectorAll('.client-param');
-        inputs.forEach(function(input) {
-          const paramName = input.getAttribute('data-param');
-          const value = input.value || input.placeholder;
-          content = content.split('{{' + paramName + '}}').join(value);
-        });
-        pre.textContent = content;
       }
 
        window.addEventListener('DOMContentLoaded', function() {
@@ -1059,7 +1041,7 @@ ${jsonIndent(depth)}${jsonPunctuation('}')}`;
      if (!isProduction && !availableHttpClients.isEmpty()) {
        html.append("<section class='global-settings'>");
        html.append("<h2>HTTP Client Settings</h2>");
-       html.append("<p>Select an HTTP client to see its usage snippet and configure parameters:</p>");
+       html.append("<p>Select an HTTP client and configure its parameters:</p>");
        html.append("<select id='client-select' onchange='updateClient()' style='padding: 0.5rem; width: 100%; max-width: 320px; margin: 0.75rem 0 1rem; border:1px solid #cfd7e3; border-radius:8px;'>");
        for (HttpClient client : availableHttpClients) {
          String clientVal = normalizeClientName(client.getName());
@@ -1074,14 +1056,13 @@ ${jsonIndent(depth)}${jsonPunctuation('}')}`;
        for (HttpClient client : availableHttpClients) {
          String clientId = normalizeClientName(client.getName());
          html.append("<div id='snippet-").append(clientId).append("' class='client-snippet' style='display: none;'>");
-         html.append("<p><strong>Description:</strong> ").append(escapeForHtml(client.getDescription())).append("</p>");
          if (!client.getParameters().isEmpty()) {
            html.append("<h4>Parameters</h4>");
            html.append("<div style='margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 1rem;'>");
            for (HttpClientParameter param : client.getParameters()) {
              html.append("<div style='min-width: 200px;'>");
              html.append("<label style='display: block; font-size: 0.8rem; color: #606266;'>").append(escapeForHtml(param.label())).append(":</label>");
-             html.append("<input type='").append(escapeForHtml(param.type())).append("' class='client-param' data-param='").append(escapeForHtml(param.name())).append("' value='").append(escapeForHtml(param.defaultValue())).append("' oninput='updateClientSnippet(\"").append(clientId).append("\")' style='padding: 0.4rem; width: 100%; border: 1px solid #dcdfe6; border-radius: 4px;'>");
+             html.append("<input type='").append(escapeForHtml(param.type())).append("' class='client-param' data-param='").append(escapeForHtml(param.name())).append("' value='").append(escapeForHtml(param.defaultValue())).append("' style='padding: 0.4rem; width: 100%; border: 1px solid #dcdfe6; border-radius: 4px;'>");
              html.append("</div>");
            }
            html.append("</div>");
@@ -1347,8 +1328,7 @@ ${jsonIndent(depth)}${jsonPunctuation('}')}`;
      html.append("async function executeThrottledClient(request) { const probability = Number.parseFloat(request.parameters.throttleProbability ?? '0.1'); const latencyExponent = Number.parseFloat(request.parameters.latencyExponent ?? '2.0'); if (Math.random() < probability) { const delayMs = Math.pow(Math.random() * 10, latencyExponent); await delay(delayMs); } return executeClassicClient(request); }");
      html.append("async function executeBurstClient(request) { const parallelClientCount = Number.parseInt(request.parameters.parallelClientCount ?? '5', 10); const requestsPerClient = Number.parseInt(request.parameters.requestsPerClient ?? '100', 10); const executions = []; for (let clientIndex = 0; clientIndex < parallelClientCount; clientIndex++) { for (let requestIndex = 0; requestIndex < requestsPerClient; requestIndex++) { executions.push(executeClassicClient(request).then(response => ({ response, ok: response.statusCode < 400 })).catch(error => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))); } } const settled = await Promise.all(executions); const succeeded = settled.filter(result => result.ok).length; const firstResponse = settled.find(result => result.response)?.response ?? null; return { statusCode: firstResponse?.statusCode ?? 200, headers: firstResponse?.headers ?? {}, body: JSON.stringify({ summary: 'Burst complete.', totalRequests: settled.length, succeeded, failed: settled.length - succeeded, sampleResponseBody: firstResponse?.body ?? null }, null, 2) }; }");
      html.append("const clientActors = { 'classic-http-client': executeClassicClient, 'throttled-http-client': executeThrottledClient, 'burst-http-client': executeBurstClient };");
-     html.append("function updateClient() { const select = document.getElementById('client-select'); const snippets = document.querySelectorAll('.client-snippet'); snippets.forEach(snippet => { snippet.style.display = 'none'; }); if (select && select.value) { const selectedSnippet = document.getElementById('snippet-' + select.value); if (selectedSnippet) { selectedSnippet.style.display = 'block'; } updateClientSnippet(select.value); } }");
-     html.append("function updateClientSnippet(clientId) { const snippetDiv = document.getElementById('snippet-' + clientId); if (!snippetDiv) return; const pre = document.getElementById('pre-' + clientId); if (!pre) return; let content = pre.getAttribute('data-template'); const inputs = snippetDiv.querySelectorAll('.client-param'); inputs.forEach(input => { const paramName = input.getAttribute('data-param'); const value = input.value || input.placeholder; content = content.split('{{' + paramName + '}}').join(value); }); pre.textContent = content; }");
+     html.append("function updateClient() { const select = document.getElementById('client-select'); const snippets = document.querySelectorAll('.client-snippet'); snippets.forEach(snippet => { snippet.style.display = 'none'; }); if (select && select.value) { const selectedSnippet = document.getElementById('snippet-' + select.value); if (selectedSnippet) { selectedSnippet.style.display = 'block'; } } }");
      html.append("async function executeTest(method, path, routeId) { const clientName = getSelectedClientName(); const actor = clientActors[clientName] ?? clientActors[DEFAULT_CLIENT_ID]; if (!actor) { alert('No HTTP client is available for this environment.'); return; } let finalUrl = path.startsWith('http://') || path.startsWith('https://') ? path : window.location.origin + path; const params = {}; document.querySelectorAll('.path-param-' + routeId).forEach(input => { params[input.dataset.param] = input.value; finalUrl = finalUrl.split(':' + input.dataset.param).join(input.value); }); const qpArray = []; document.querySelectorAll('.query-param-' + routeId).forEach(input => { params[input.dataset.param] = input.value; if (input.value) { qpArray.push(encodeURIComponent(input.dataset.param) + '=' + encodeURIComponent(input.value)); } }); if (qpArray.length > 0) { finalUrl += (finalUrl.includes('?') ? '&' : '?') + qpArray.join('&'); } const headers = {}; document.querySelectorAll('.header-input-' + routeId).forEach(input => { if (input.value) { headers[input.dataset.header] = input.value; } }); const bodyInput = document.getElementById('body-' + routeId); let requestBody = bodyInput ? bodyInput.value : null; if (requestBody) { for (const key in params) { requestBody = requestBody.split('{{' + key + '}}').join(params[key]); requestBody = requestBody.split(':' + key).join(params[key]); } } const fileInputs = document.querySelectorAll('.file-input-' + routeId); if (fileInputs.length > 0) { const formData = new FormData(); const parsedRequestBody = parseJsonIfPossible(requestBody); formData.append('body', JSON.stringify(parsedRequestBody)); fileInputs.forEach(input => { const files = input.files ? Array.from(input.files) : []; if (files.length === 0) { return; } const limit = Number.parseInt(input.dataset.limit || '1', 10); if (!Number.isNaN(limit) && limit > 0 && files.length > limit) { throw new Error('File parameter \"' + input.dataset.param + '\" allows at most ' + limit + ' file(s).'); } files.forEach(file => formData.append(input.dataset.param, file)); }); requestBody = formData; } const resultDiv = document.getElementById('result-' + routeId); resultDiv.style.display = 'block'; resultDiv.innerHTML = '<div class=\"result-header\">Executing...</div>'; try { const data = await actor({ method, url: finalUrl, headers, body: normalizeBody(requestBody), parameters: getClientParameters(clientName) }); let resultHtml = '<div class=\"result-header\">Status: ' + data.statusCode + '</div>'; resultHtml += '<h4>Response Headers</h4><pre class=\"json-rendered test-result-code\" style=\"background:#272822; color:#f8f8f2; padding:1rem; border-radius:6px; overflow-x:auto;\">' + renderStructuredContent(data.headers ?? {}) + '</pre>'; resultHtml += '<h4>Response Body</h4><pre class=\"json-rendered test-result-code\" style=\"background:#272822; color:#f8f8f2; padding:1rem; border-radius:6px; overflow-x:auto;\">' + renderStructuredContent(data.body) + '</pre>'; resultDiv.innerHTML = resultHtml; } catch (error) { const message = error instanceof Error ? error.message : String(error); resultDiv.innerHTML = '<div style=\"color: red;\">Error: ' + escapeHtml(message) + '</div>'; } }");
      html.append("function toggleEndpoint(element) { element.classList.toggle('open'); }");
      html.append("function toggleGroup(element) { const list = element.nextElementSibling; if (list) list.style.display = list.style.display === 'none' ? 'block' : 'none'; }");
