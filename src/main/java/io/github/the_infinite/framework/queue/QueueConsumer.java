@@ -139,12 +139,14 @@ public class QueueConsumer<T, ResultType> {
         )));
 
         //? Add periodic tracking of progress
-        vertx.setPeriodic(600000, id -> getStatistics()
-          .onFailure(cause -> logger.error(context, LogEvent.create("Failed to get queue statistics", getClass().getSimpleName(), Map.of(
-            "queueName", queueName,
-            "error", cause.getMessage(),
-            "stackTrace", Arrays.stream(cause.getStackTrace()).map(StackTraceElement::toString)
-          )))));
+        if (AppEnvironment.getInstance().getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
+          vertx.setPeriodic(600000, id -> getStatistics()
+            .onFailure(cause -> logger.error(context, LogEvent.create("Failed to get queue statistics", getClass().getSimpleName(), Map.of(
+              "queueName", queueName,
+              "error", cause.getMessage(),
+              "stackTrace", Arrays.stream(cause.getStackTrace()).map(StackTraceElement::toString)
+            )))));
+        }
 
         //? Handle messages here.
         consumer.handler(message -> vertx.executeBlocking(() -> {
@@ -259,7 +261,8 @@ public class QueueConsumer<T, ResultType> {
                 .onSuccess(v -> queueManagement.acknowledgeMessage(message.envelope().getDeliveryTag(), false))
                 .onFailure(v -> queueManagement.rejectMessage(message.envelope().getDeliveryTag(), false, true));
             } else {
-              queueManagement.rejectMessage(message.envelope().getDeliveryTag(), false, false).onComplete(ar -> {});
+              queueManagement.rejectMessage(message.envelope().getDeliveryTag(), false, false).onComplete(ar -> {
+              });
             }
           }
 

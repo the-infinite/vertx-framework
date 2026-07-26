@@ -19,14 +19,27 @@ import lombok.Getter;
 public class DocumentationRegistrant {
     private static final DocumentationRegistrant INSTANCE = new DocumentationRegistrant();
 
+    /**
+     * Enum to define different documentation rendering modes.
+     * CONVENTIONAL: Standard documentation view with detailed endpoint information.
+     * EXTERNAL: External-facing documentation view similar to Paystack API docs with group descriptions.
+     */
+    public enum DocumentationMode {
+        CONVENTIONAL,
+        EXTERNAL
+    }
+
     private final Map<String, String> legacyGlobalHeaders = new ConcurrentHashMap<>();
     private final Map<String, String> unauthenticatedGlobalHeaders = new ConcurrentHashMap<>();
     private final Map<String, String> authenticatedGlobalHeaders = new ConcurrentHashMap<>();
     private final Map<String, String> authSettings = new ConcurrentHashMap<>();
     private final List<RegisteredRoute> registeredRoutes = Collections.synchronizedList(new ArrayList<>());
     private final List<HttpClient> httpClients = Collections.synchronizedList(new ArrayList<>());
+    private final Map<String, String> groupDescriptions = new ConcurrentHashMap<>();
     @Getter
     private Integer globalRateLimit;
+    @Getter
+    private DocumentationMode documentationMode = DocumentationMode.CONVENTIONAL;
 
     private DocumentationRegistrant() {
         registerHttpClient(new ClassicHttpClient());
@@ -99,6 +112,43 @@ public class DocumentationRegistrant {
 
     public List<RegisteredRoute> getRegisteredRoutes() {
         return Collections.unmodifiableList(registeredRoutes);
+    }
+
+    @SuppressWarnings("unused")
+    public void setDocumentationMode(DocumentationMode mode) {
+        this.documentationMode = mode;
+    }
+
+    @SuppressWarnings("unused")
+    public void setGroupDescription(String groupName, String description) {
+        if (groupName == null || groupName.isBlank()) {
+            throw new IllegalArgumentException("Group name cannot be null or blank");
+        }
+        this.groupDescriptions.put(groupName.trim(), description != null ? description.trim() : "");
+    }
+
+    @SuppressWarnings("unused")
+    public void setGroupDescriptions(Map<String, String> descriptions) {
+        this.groupDescriptions.clear();
+        if (descriptions != null) {
+            descriptions.forEach((groupName, desc) -> {
+                if (groupName != null && !groupName.isBlank()) {
+                    this.groupDescriptions.put(groupName.trim(), desc != null ? desc.trim() : "");
+                }
+            });
+        }
+    }
+
+    public String getGroupDescription(String groupName) {
+        if (groupName == null || groupName.isBlank()) {
+            return "N/A";
+        }
+        String description = groupDescriptions.get(groupName.trim());
+        return description == null || description.isBlank() ? "N/A" : description;
+    }
+
+    public Map<String, String> getGroupDescriptions() {
+        return Collections.unmodifiableMap(groupDescriptions);
     }
 
     /**
