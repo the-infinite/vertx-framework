@@ -1,9 +1,9 @@
 package io.github.the_infinite.framework.data;
 
+import org.hibernate.SessionFactory;
 import org.hibernate.boot.Metadata;
 import org.hibernate.boot.MetadataSources;
 import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
-import org.hibernate.reactive.mutiny.Mutiny;
 import org.hibernate.tool.schema.TargetType;
 import org.hibernate.tool.schema.spi.*;
 
@@ -26,8 +26,6 @@ import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
 import io.github.the_infinite.framework.utils.DataHelpers;
-import io.smallrye.mutiny.Multi;
-import io.smallrye.mutiny.Uni;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
@@ -80,7 +78,7 @@ public class MigrationHelper {
   }
 
 
-  private static Future<Void> createMigrationsTable(Vertx vertx, Mutiny.SessionFactory sessionFactory) {
+  private static Future<Void> createMigrationsTable(Vertx vertx, SessionFactory sessionFactory) {
     final var console = ConsoleLogger.getInstance(vertx);
     final var initialMigrationScriptActions = List.of(
       // Create the policy to ban updates.
@@ -138,10 +136,16 @@ public class MigrationHelper {
     );
 
     try {
-      return RepositoryActor.wrap(sessionFactory.withSession(session ->
-        Multi.createFrom().iterable(initialMigrationScriptActions).onItem()
-          .transformToUniAndConcatenate(command -> session.createNativeQuery(command).executeUpdate())
-          .collect().last().chain(v -> session.flush())));
+      return RepositoryActor.wrap(() -> {
+        sessionFactory.fromSession(session -> {
+          for (final var command : initialMigrationScriptActions) {
+            session.createNativeQuery(command).executeUpdate();
+          }
+          session.flush();
+          return null;
+        });
+        return null;
+      });
     } catch (Exception e) {
       console.error("Failed to generate initial migration for creating the migrations table: " + e.getMessage());
       return Future.failedFuture(e);
@@ -158,7 +162,7 @@ public class MigrationHelper {
    *
    * @return true if changes were detected and a migration script was generated, false otherwise.
    */
-  public static boolean generate(Vertx vertx, Mutiny.SessionFactory sessionFactory) {
+  public static boolean generate(Vertx vertx, SessionFactory sessionFactory) {
     final var env = AppEnvironment.getInstance();
     final var console = ConsoleLogger.getInstance(vertx);
     final var annotatedClasses = DataHelpers.findSubclasses(BaseEntity.class);
@@ -357,7 +361,7 @@ public class MigrationHelper {
    * Executes the migrations that have been generated and not yet applied to the database.
    * This should be run on application startup to ensure the database is up to date.
    */
-  private static void executeMigrations(final ConsoleLogger console, final Mutiny.SessionFactory sessionFactory, final List<File> migrationFiles, final List<MigrationEntry> migrations, final Promise<Void> promise) {
+  private static Future<Void> executeMigrations(final ConsoleLogger console, final SessionFactory sessionFactory, final List<File> migrationFiles, final List<MigrationEntry> migrations) {
     //? Fetch this first...
     final var migrationNames = migrations.stream().map(MigrationEntry::getMigrationName).collect(Collectors.toSet());
     final var unappliedMigrations = migrationFiles.stream().filter(file -> !migrationNames.contains(file.getName())).toList();
@@ -365,55 +369,56 @@ public class MigrationHelper {
     //? If we find this, then we can continue...
     if (unappliedMigrations.isEmpty()) {
       console.exec("Nothing to migrate, database is up to date.");
-      promise.succeed();
-      return;
+      return Future.succeededFuture();
     }
 
     //? Apply
     console.info("Applying %d pending migrations...".formatted(unappliedMigrations.size()));
 
-    //? Then, we read and apply each one.
-    Multi.createFrom().iterable(unappliedMigrations).onItem().transformToUniAndConcatenate(file -> {
-      final String sql;
-      try {
-        sql = Files.readString(file.toPath());
-      } catch (Exception e) {
-        return Uni.createFrom().failure(e);
-      }
+    return RepositoryActor.wrap(() -> {
+      sessionFactory.fromStatelessTransaction(session -> {
+        for (final var file : unappliedMigrations) {
+          final String sql;
+          try {
+            sql = Files.readString(file.toPath());
+          } catch (Exception e) {
+            throw new RuntimeException("Failed to read migration file: " + file.getName(), e);
+          }
 
-      console.info("Applying migration " + file.getName());
-      return sessionFactory.withStatelessTransaction((session, tx) ->
-        Multi.createFrom()
-          .iterable(Arrays.stream(sql.split(STATEMENT_BREAKPOINT))
-            .map(cmd -> "%s;".formatted(cmd).trim()).filter(cmd -> !cmd.equals(";")).toList()).onItem()
-          .transformToUniAndConcatenate(command -> session.createNativeQuery(command).executeUpdate())
-          .collect().last().chain(v -> {
-            final var entry = new MigrationEntry();
-            final var crc = new CRC32();
-            crc.update(sql.getBytes());
+          console.info("Applying migration " + file.getName());
 
-            //? Ensure these properties have values; otherwise persisting will fail since
-            // they are non-nullable. The rest of the properties are immutable, so we
-            // can set them in the return statement.
-            // For the immutable properties in a set
-            return session.insert(
-              entry.setMigrationName(file.getName())
-                .setChecksum(crc.getValue())
-                .setData(DataHelpers.toBase64(sql))
-                .setUid(UUID.randomUUID())
-            );
-          })).onItem().invoke(() -> console.exec("Applied " + file.getName())).onFailure().invoke(error -> {
-        console.error("Failed to apply migration " + file.getName() + ": " + error.getMessage());
-        error.printStackTrace();
-        promise.fail(error);
+          final var statements = Arrays.stream(sql.split(STATEMENT_BREAKPOINT))
+            .map(cmd -> "%s;".formatted(cmd).trim())
+            .filter(cmd -> !cmd.equals(";"))
+            .toList();
+
+          for (final var command : statements) {
+            session.createNativeQuery(command).executeUpdate();
+          }
+
+          final var entry = new MigrationEntry();
+          final var crc = new CRC32();
+          crc.update(sql.getBytes());
+
+          session.insert(
+            entry.setMigrationName(file.getName())
+              .setChecksum(crc.getValue())
+              .setData(DataHelpers.toBase64(sql))
+              .setUid(UUID.randomUUID())
+          );
+
+          console.exec("Applied " + file.getName());
+        }
+        return null;
       });
-    }).collect().last().subscribe().with(promise::succeed, promise::fail);
+      return null;
+    });
   }
 
   /**
    * The main method to run the migration generation standalone.
    */
-  public static Future<Void> migrate(Vertx vertx, Mutiny.SessionFactory sessionFactory) {
+  public static Future<Void> migrate(Vertx vertx, SessionFactory sessionFactory) {
     try {
       final var promise = Promise.<Void>promise();
       final var console = ConsoleLogger.getInstance(vertx);
@@ -498,7 +503,9 @@ public class MigrationHelper {
           console.info("Migrations table does not exist, applying all migrations...");
           createMigrationsTable(vertx, sessionFactory)
             .onFailure(promise::fail)
-            .onSuccess(v -> executeMigrations(console, sessionFactory, migrationFiles, List.of(), promise));
+            .onSuccess(v -> executeMigrations(console, sessionFactory, migrationFiles, List.of())
+              .onSuccess(ignored -> promise.succeed())
+              .onFailure(promise::fail));
           return;
         }
 
@@ -509,7 +516,9 @@ public class MigrationHelper {
             null
           )
           .onFailure(promise::fail)
-          .onSuccess(migrations -> executeMigrations(console, sessionFactory, migrationFiles, migrations, promise));
+          .onSuccess(migrations -> executeMigrations(console, sessionFactory, migrationFiles, migrations)
+            .onSuccess(ignored -> promise.succeed())
+            .onFailure(promise::fail));
       });
 
       return promise.future();

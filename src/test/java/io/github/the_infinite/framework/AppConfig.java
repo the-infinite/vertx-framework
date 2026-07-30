@@ -1,6 +1,6 @@
 package io.github.the_infinite.framework;
 
-import org.hibernate.reactive.mutiny.Mutiny;
+import org.hibernate.SessionFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import io.github.the_infinite.framework.data.DatabaseFactory;
@@ -10,7 +10,7 @@ import io.vertx.core.Vertx;
 
 @SuppressWarnings({"unused", "resource"})
 public class AppConfig {
-  private static Future<Mutiny.SessionFactory> databaseSession;
+  private static Future<SessionFactory> databaseSession;
   private static PostgreSQLContainer<?> postgreSQLContainer;
 
   private final Vertx vertx;
@@ -19,7 +19,7 @@ public class AppConfig {
     this.vertx = vertx;
   }
 
-  public Future<Mutiny.SessionFactory> createAppDatabase() {
+  public Future<SessionFactory> createAppDatabase() {
     //return DatabaseFactory.createPostgresDatabase(vertx);
     return DatabaseFactory.createPostgresDatabase(vertx, new DatabaseFactory.PostgresOptions().setOverrideUrl(startDatabaseContainer()));
   }

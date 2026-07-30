@@ -5,8 +5,8 @@ import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.indices.GetIndexRequest;
 import org.hibernate.boot.MetadataSources;
-import org.hibernate.reactive.mutiny.Mutiny;
-import org.hibernate.reactive.provider.ReactiveServiceRegistryBuilder;
+import org.hibernate.SessionFactory;
+import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
 import org.jetbrains.annotations.NotNull;
 
 import java.net.URI;
@@ -38,13 +38,13 @@ import io.vertx.redis.client.impl.RedisClient;
 public final class DatabaseFactory {
   private static final PostgresOptions defaultOptions = new PostgresOptions();
   private static final Map<Vertx, RabbitMQClient> queueClients = new ConcurrentHashMap<>();
-  private static final Map<String, Mutiny.SessionFactory> sessionFactories = new ConcurrentHashMap<>();
+  private static final Map<String, SessionFactory> sessionFactories = new ConcurrentHashMap<>();
   private static final Map<Vertx, RestHighLevelClient> elasticClients = new ConcurrentHashMap<>();
   private static final Map<Vertx, RedisClient> redisClients = new ConcurrentHashMap<>();
   private static final Map<Vertx, MongoClient> mongoClients = new ConcurrentHashMap<>();
   private static final int DEFAULT_ES_PORT = 9200;
 
-  public static Future<Mutiny.SessionFactory> createPostgresDatabase(Vertx vertx) {
+  public static Future<SessionFactory> createPostgresDatabase(Vertx vertx) {
     return createPostgresDatabase(vertx, defaultOptions);
   }
 
@@ -196,7 +196,7 @@ public final class DatabaseFactory {
     return client;
   }
 
-  public static Future<Mutiny.SessionFactory> createPostgresDatabase(@NotNull Vertx vertx, @NotNull PostgresOptions options) {
+  public static Future<SessionFactory> createPostgresDatabase(@NotNull Vertx vertx, @NotNull PostgresOptions options) {
     //? We need these singletons first.
     final var console = ConsoleLogger.getInstance(vertx);
     final var env = AppEnvironment.getInstance();
@@ -215,6 +215,7 @@ public final class DatabaseFactory {
       //? First, build the basics.
       final var props = new HashMap<String, Object>();
       props.put("jakarta.persistence.jdbc.url", toJDBCUrl(options.url));
+      props.put("jakarta.persistence.jdbc.driver", "org.postgresql.Driver");
 
       // Inject BOTH standard JPA and Hibernate native properties
       if (options.username != null && !options.username.isBlank()) {
@@ -228,7 +229,6 @@ public final class DatabaseFactory {
 
       props.put("hibernate.connection.pool_size", options.poolSize);
       props.put("jakarta.persistence.schema-generation.database.action", options.schemaGenerateAction);
-      props.put("hibernate.vertx.pool.configuration_class", ConnectionResolver.class.getName());
       props.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
       props.put("jakarta.persistence.validation.factory", ValidationHelper.getInstance().factory());
 
@@ -251,7 +251,7 @@ public final class DatabaseFactory {
       }
 
       //? 1. Create the Standard Service Registry
-      final var registry = new ReactiveServiceRegistryBuilder()
+      final var registry = new StandardServiceRegistryBuilder()
         .applySettings(props)
         .build();
 
@@ -267,14 +267,13 @@ public final class DatabaseFactory {
 
       //? 4. Build Metadata and SessionFactory
       final var sessionFactory = metadataSources.buildMetadata().buildSessionFactory();
-      final var mutinyFactory = sessionFactory.unwrap(Mutiny.SessionFactory.class);
-      PersistentRepository.initialize(SeederEntry.Modules.SYSTEM, SeederEntry.class, mutinyFactory);
+      PersistentRepository.initialize(SeederEntry.Modules.SYSTEM, SeederEntry.class, sessionFactory);
 
       //? Put this in.
-      sessionFactories.put(options.unitName, mutinyFactory);
+      sessionFactories.put(options.unitName, sessionFactory);
 
-      //? Then return to the created mutiny factory.
-      return mutinyFactory;
+      //? Then return to the created session factory.
+      return sessionFactory;
     }).onSuccess(sessionFactory -> console.exec("Database client is ready\n"));
   }
 

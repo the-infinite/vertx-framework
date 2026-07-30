@@ -1,16 +1,11 @@
 package io.github.the_infinite.framework.data;
 
-import org.hibernate.reactive.pool.impl.DefaultSqlClientPoolConfiguration;
-
 import java.net.URI;
-import java.util.Objects;
 import java.util.Optional;
 
 import io.github.the_infinite.framework.utils.DataHelpers;
-import io.vertx.core.net.ClientSSLOptions;
-import io.vertx.pgclient.PgConnectOptions;
 
-public final class ConnectionResolver extends DefaultSqlClientPoolConfiguration {
+public final class ConnectionResolver {
   static Optional<ConnectionInfo> resolveUri(String rawUrl) {
     if (rawUrl == null || rawUrl.isBlank()) {
       return Optional.empty();
@@ -57,37 +52,6 @@ public final class ConnectionResolver extends DefaultSqlClientPoolConfiguration 
     }
 
     return Optional.of(new ConnectionInfo(url, username, password));
-  }
-
-  @Override
-  public PgConnectOptions connectOptions(URI uri) {
-    final String overrideUrl = System.getProperty("pg.url.override");
-    String urlToUse = overrideUrl != null ? overrideUrl : uri.toString();
-
-    //? Resolve the URL then.
-    final var resolved = resolveUri(urlToUse);
-
-    //? If this is okay...
-    if (resolved.isEmpty()) {
-      throw new IllegalArgumentException("Invalid PostgreSQL URL: " + urlToUse);
-    }
-
-    //? Okay then.
-    final var info = resolved.get();
-
-    //? Replace the URL with the resolved one.
-    urlToUse = info.url();
-
-    // Vert.x's PgConnectOptions cannot parse "jdbc:" URIs.
-    // We must strip it so it can correctly extract the embedded username/password.
-    if (urlToUse.startsWith("jdbc:")) {
-      urlToUse = urlToUse.replaceFirst("jdbc:", ""); // Removes "jdbc:"
-    }
-
-    final var options = PgConnectOptions.fromUri(urlToUse).setUser(info.username).setPassword(info.password);
-    options.setSslOptions(Objects.requireNonNullElse(options.getSslOptions(), new ClientSSLOptions()));
-
-    return options;
   }
 
   record ConnectionInfo(String url, String username, String password) {

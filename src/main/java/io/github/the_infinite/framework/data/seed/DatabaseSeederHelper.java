@@ -1,6 +1,6 @@
 package io.github.the_infinite.framework.data.seed;
 
-import org.hibernate.reactive.mutiny.Mutiny;
+import org.hibernate.StatelessSession;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -74,7 +74,7 @@ public final class DatabaseSeederHelper {
     });
   }
 
-  private static Future<Void> execute(Mutiny.StatelessSession transaction, List<?
+  private static Future<Void> execute(StatelessSession transaction, List<?
                                         extends DatabaseSeeder> seeders,
                                       Set<String> executedSeeders, boolean seed) {
     final var promise = Promise.<Void>promise();
@@ -84,7 +84,7 @@ public final class DatabaseSeederHelper {
   }
 
   private static void executeNext(
-    Mutiny.StatelessSession transaction,
+    StatelessSession transaction,
     List<? extends DatabaseSeeder> seeders,
     Set<String> executedSeeders,
     boolean seed,

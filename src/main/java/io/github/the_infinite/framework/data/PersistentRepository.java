@@ -1,6 +1,8 @@
 package io.github.the_infinite.framework.data;
 
-import org.hibernate.reactive.mutiny.Mutiny;
+import org.hibernate.Session;
+import org.hibernate.SessionFactory;
+import org.hibernate.StatelessSession;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -26,7 +28,7 @@ import lombok.Getter;
 public final class PersistentRepository<TModel extends BaseEntity, TModule extends Enum<?>> {
   static final Map<Class<?>, PersistentRepository<?, ?>> instances = new ConcurrentHashMap<>();
   private static final Logger logger = LoggerFactory.getLogger(PersistentRepository.class);
-  private final Mutiny.SessionFactory sessionFactory;
+  private final SessionFactory sessionFactory;
   /**
    * -- GETTER --
    *  Returns the specific data module (unique to the calling application) that this repository originates from.
@@ -37,7 +39,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
   private final StatelessRepositoryActor<TModel> statelessRepositoryActor;
   private final StatefulRepositoryActor<TModel> statefulRepositoryActor;
 
-  PersistentRepository(TModule module, Class<TModel> modelType, Mutiny.SessionFactory sessionFactory) {
+  PersistentRepository(TModule module, Class<TModel> modelType, SessionFactory sessionFactory) {
     this.module = module;
     this.sessionFactory = sessionFactory;
     this.modelType = modelType;
@@ -48,7 +50,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
   /**
    * Initializes the repository for a specific model type and module.
    */
-  public static <TModel extends BaseEntity, TModule extends Enum<?>> void initialize(@NotNull TModule module, @NotNull Class<TModel> modelType, @NotNull Mutiny.SessionFactory sessionFactory) {
+  public static <TModel extends BaseEntity, TModule extends Enum<?>> void initialize(@NotNull TModule module, @NotNull Class<TModel> modelType, @NotNull SessionFactory sessionFactory) {
     if (instances.containsKey(modelType)) {
       throw new IllegalStateException("Repository for model type " + modelType.getName() + " has already been initialized.");
     }
@@ -137,7 +139,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
     final var console = ConsoleLogger.getInstance();
     console.debug("Checking if table '%s' exists for model '%s'".formatted(tableName, modelType.getName()));
     final var sqlQuery = "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = :tableName";
-    return RepositoryActor.wrap(sessionFactory.withSession(session -> session.createNativeQuery(sqlQuery, Long.class).setParameter("tableName", tableName).getSingleResult().map(count -> count > 0)));
+    return RepositoryActor.wrap(() -> sessionFactory.fromSession(session -> session.createNativeQuery(sqlQuery, Long.class).setParameter("tableName", tableName).getSingleResult() > 0));
   }
 
   /**
@@ -176,7 +178,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param <ReturnType> The result of the future.
    * @return A future that resolves to use a database transaction
    */
-  public <ReturnType> Future<ReturnType> transaction(Function<Mutiny.Session, Future<ReturnType>> future) {
+  public <ReturnType> Future<ReturnType> transaction(Function<Session, Future<ReturnType>> future) {
     return statefulRepositoryActor.transaction(future);
   }
 
@@ -198,11 +200,11 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * Returns the session factory bound to this repository. You can think of it as an abstraction over the
    * database client.
    */
-  public Mutiny.SessionFactory database() {
+  public SessionFactory database() {
     return this.sessionFactory;
   }
 
-  public Future<Long> getCount(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+  public Future<Long> getCount(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.getCount(filter, options, transaction);
   }
 
@@ -224,26 +226,26 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction - Optional transaction/database context. Defaults to the repository database connection.
    * @return A paginated result containing the items, total count, limit, current cursor, and next cursor (if any).
    */
-  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.getPaginatedView(filter, options, transaction);
   }
 
   /**
-   * @see #getPaginatedView(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getPaginatedView(QueryData, RepositoryOptions, Session)
    */
   public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
     return this.getPaginatedView(filter, options, null);
   }
 
   /**
-   * @see #getPaginatedView(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getPaginatedView(QueryData, RepositoryOptions, Session)
    */
   public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter) {
     return this.getPaginatedView(filter, null);
   }
 
   /**
-   * @see #getPaginatedView(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getPaginatedView(QueryData, RepositoryOptions, Session)
    */
   public Future<PaginatedResult<TModel>> getPaginatedView() {
     return this.getPaginatedView(null);
@@ -265,26 +267,26 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction The optional transactional session to use for the query. If null, a new session is created.
    * @return A `Future` that resolves to a list of entities matching the criteria.
    */
-  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return this.statefulRepositoryActor.getMany(filter, options, transaction);
   }
 
   /**
-   * @see #getMany(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getMany(QueryData, RepositoryOptions, Session)
    */
   public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
     return this.getMany(filter, options, null);
   }
 
   /**
-   * @see #getMany(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getMany(QueryData, RepositoryOptions, Session)
    */
   public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter) {
     return this.getMany(filter, null);
   }
 
   /**
-   * @see #getMany(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getMany(QueryData, RepositoryOptions, Session)
    */
   public Future<List<TModel>> getMany() {
     return this.getMany(null);
@@ -308,26 +310,26 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    *                    the repository database connection.
    * @return A promise resolving to an array of unique values for the specified column.
    */
-  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.getDistinctRows(filter, options, transaction);
   }
 
   /**
-   * @see #getDistinctRows(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getDistinctRows(QueryData, RepositoryOptions, Session)
    */
   public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
     return this.getDistinctRows(filter, options, null);
   }
 
   /**
-   * @see #getDistinctRows(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getDistinctRows(QueryData, RepositoryOptions, Session)
    */
   public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter) {
     return this.getDistinctRows(filter, null);
   }
 
   /**
-   * @see #getDistinctRows(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getDistinctRows(QueryData, RepositoryOptions, Session)
    */
   public Future<List<TModel>> getDistinctRows() {
     return this.getDistinctRows(null);
@@ -341,26 +343,26 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction Optional transaction context for the database operation
    * @return A future that resolves to the found entity or null if no entity matches the criteria
    */
-  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return this.statefulRepositoryActor.getOne(filter, options, transaction);
   }
 
   /**
-   * @see #getOne(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getOne(QueryData, RepositoryOptions, Session)
    */
   public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
     return this.getOne(filter, options, null);
   }
 
   /**
-   * @see #getOne(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getOne(QueryData, RepositoryOptions, Session)
    */
   public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter) {
     return this.getOne(filter, null);
   }
 
   /**
-   * @see #getOne(QueryData, RepositoryOptions, Mutiny.Session)
+   * @see #getOne(QueryData, RepositoryOptions, Session)
    */
   public Future<Optional<TModel>> getOne() {
     return this.getOne(null);
@@ -374,7 +376,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction Optional database transaction to execute the query within
    * @return A promise that resolves to the found entity or null if no entity matches the given id
    */
-  public Future<Optional<TModel>> getById(long id, LockModeType lockMode, @Nullable Mutiny.Session transaction) {
+  public Future<Optional<TModel>> getById(long id, LockModeType lockMode, @Nullable Session transaction) {
     return this.statefulRepositoryActor.getById(id, lockMode, transaction);
   }
 
@@ -384,14 +386,14 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param id          - The primary key value to search for
    * @param transaction Optional database transaction to execute the query within
    * @return A promise that resolves to the found entity or null if no entity matches the given id
-   * @see #getById(long, LockModeType, Mutiny.Session)
+   * @see #getById(long, LockModeType, Session)
    */
-  public Future<Optional<TModel>> getById(long id, @Nullable Mutiny.Session transaction) {
+  public Future<Optional<TModel>> getById(long id, @Nullable Session transaction) {
     return this.getById(id, LockModeType.OPTIMISTIC, transaction);
   }
 
   /**
-   * @see #getById(long, LockModeType, Mutiny.Session)
+   * @see #getById(long, LockModeType, Session)
    */
   public Future<Optional<TModel>> getById(long id) {
     return this.getById(id, null);
@@ -407,14 +409,14 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction  Optional transaction or database connection to execute the update operation.
    * @return A future resolving to a change result containing the count of affected rows and any additional metadata.
    */
-  public Future<ChangeResultModel<TModel>> updateMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Mutiny.StatelessSession> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.StatelessSession transaction) {
+  public Future<ChangeResultModel<TModel>> updateMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, StatelessSession> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable StatelessSession transaction) {
     return this.statelessRepositoryActor.updateMany(filter, valueChanger, options, transaction);
   }
 
   /**
-   * @see #updateMany(QueryData, RepositoryActor.ChangeEffectorFunction, RepositoryOptions, Mutiny.StatelessSession)
+   * @see #updateMany(QueryData, RepositoryActor.ChangeEffectorFunction, RepositoryOptions, StatelessSession)
    */
-  public Future<ChangeResultModel<TModel>> updateMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Mutiny.StatelessSession> valueChanger, @NotNull RepositoryOptions<TModel> options) {
+  public Future<ChangeResultModel<TModel>> updateMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, StatelessSession> valueChanger, @NotNull RepositoryOptions<TModel> options) {
     return this.updateMany(filter, valueChanger, options, null);
   }
 
@@ -435,14 +437,14 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction  The optional transactional session to use for the query. If null, a new session is created.
    * @return A `Future` that resolves to an `Optional` containing the updated entity or an empty `Optional` if no entity was updated.
    */
-  public Future<Optional<TModel>> updateOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Mutiny.Session> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+  public Future<Optional<TModel>> updateOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Session> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return this.statefulRepositoryActor.updateOne(filter, valueChanger, options, transaction);
   }
 
   /**
-   * @see #updateOne(QueryData, RepositoryActor.ChangeEffectorFunction, RepositoryOptions, Mutiny.Session)
+   * @see #updateOne(QueryData, RepositoryActor.ChangeEffectorFunction, RepositoryOptions, Session)
    */
-  public Future<Optional<TModel>> updateOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Mutiny.Session> valueChanger, @NotNull RepositoryOptions<TModel> options) {
+  public Future<Optional<TModel>> updateOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Session> valueChanger, @NotNull RepositoryOptions<TModel> options) {
     return this.updateOne(filter, valueChanger, options, null);
   }
 
@@ -462,14 +464,14 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction  The optional transactional session to use for the query. If null, a new session is created.
    * @return A `Future` that resolves to an `Optional` containing the updated entity or an empty `Optional` if no entity was updated.
    */
-  public Future<Optional<TModel>> updateById(long id, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Mutiny.Session> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+  public Future<Optional<TModel>> updateById(long id, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Session> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.updateById(id, valueChanger, options, transaction);
   }
 
   /**
-   * @see #updateById(long, RepositoryActor.ChangeEffectorFunction, RepositoryOptions, Mutiny.Session)
+   * @see #updateById(long, RepositoryActor.ChangeEffectorFunction, RepositoryOptions, Session)
    */
-  public Future<Optional<TModel>> updateById(long id, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Mutiny.Session> valueChanger, @NotNull RepositoryOptions<TModel> options) {
+  public Future<Optional<TModel>> updateById(long id, @NotNull RepositoryActor.ChangeEffectorFunction<TModel, Session> valueChanger, @NotNull RepositoryOptions<TModel> options) {
     return this.updateById(id, valueChanger, options, null);
   }
 
@@ -487,12 +489,12 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction The optional transactional session to use for the operation. If null, a new session is created.
    * @return A `Future` that resolves to the list of persisted entities.
    */
-  public Future<List<TModel>> createMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.StatelessSession transaction) {
+  public Future<List<TModel>> createMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options, @Nullable StatelessSession transaction) {
     return statelessRepositoryActor.createMany(items, options, transaction);
   }
 
   /**
-   * @see #createMany(List, RepositoryOptions, Mutiny.StatelessSession)
+   * @see #createMany(List, RepositoryOptions, StatelessSession)
    */
   public Future<List<TModel>> createMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options) {
     return this.createMany(items, options, null);
@@ -512,12 +514,12 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction The optional transactional session to use for the operation. If null, a new session is created.
    * @return A `Future` that resolves to an `Optional` containing the persisted entity.
    */
-  public Future<Optional<TModel>> createOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+  public Future<Optional<TModel>> createOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return this.statefulRepositoryActor.createOne(item, options, transaction);
   }
 
   /**
-   * @see #createOne(BaseEntity, RepositoryOptions, Mutiny.Session)
+   * @see #createOne(BaseEntity, RepositoryOptions, Session)
    */
   public Future<Optional<TModel>> createOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options) {
     return this.createOne(item, options, null);
@@ -541,12 +543,12 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * entities.
    */
   public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter,
-                                    @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+                                    @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.deleteMany(filter, options, transaction);
   }
 
   /**
-   * @see #deleteMany(DeleteQueryData, RepositoryOptions, Mutiny.Session)
+   * @see #deleteMany(DeleteQueryData, RepositoryOptions, Session)
    */
   public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter,
                                     @Nullable RepositoryOptions<TModel> options) {
@@ -554,14 +556,14 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
   }
 
   /**
-   * @see #deleteMany(DeleteQueryData, RepositoryOptions, Mutiny.Session)
+   * @see #deleteMany(DeleteQueryData, RepositoryOptions, Session)
    */
   public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter) {
     return this.deleteMany(filter, null);
   }
 
   /**
-   * @see #deleteMany(DeleteQueryData, RepositoryOptions, Mutiny.Session)
+   * @see #deleteMany(DeleteQueryData, RepositoryOptions, Session)
    */
   public Future<Integer> deleteMany() {
     return this.deleteMany(null);
@@ -584,12 +586,12 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @return A `Future` that resolves whether this was deleted successfully.
    */
   public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter,
-                                   @Nullable RepositoryOptions<TModel> options, @Nullable Mutiny.Session transaction) {
+                                   @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.deleteOne(filter, options, transaction);
   }
 
   /**
-   * @see #deleteOne(DeleteQueryData, RepositoryOptions, Mutiny.Session)
+   * @see #deleteOne(DeleteQueryData, RepositoryOptions, Session)
    */
   public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter,
                                    @Nullable RepositoryOptions<TModel> options) {
@@ -597,7 +599,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
   }
 
   /**
-   * @see #deleteOne(DeleteQueryData, RepositoryOptions, Mutiny.Session)
+   * @see #deleteOne(DeleteQueryData, RepositoryOptions, Session)
    */
   public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter) {
     return this.deleteOne(filter, null);
@@ -624,7 +626,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
   }
 
   /**
-   * @see #deleteOne(DeleteQueryData, RepositoryOptions, Mutiny.Session)
+   * @see #deleteOne(DeleteQueryData, RepositoryOptions, Session)
    */
   public Future<Boolean> deleteOne() {
     return this.deleteOne(null);
@@ -644,12 +646,12 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction The optional transactional session to use for the operation. If null, a new session is created.
    * @return A `Future` that resolves to an `Optional` containing the deleted entity or an empty `Optional` if no entity was deleted.
    */
-  public Future<Optional<TModel>> deleteById(long id, @Nullable Mutiny.Session transaction) {
+  public Future<Optional<TModel>> deleteById(long id, @Nullable Session transaction) {
     return statefulRepositoryActor.deleteById(id, transaction);
   }
 
   /**
-   * @see #deleteById(long, Mutiny.Session)
+   * @see #deleteById(long, Session)
    */
   public Future<Optional<TModel>> deleteById(long id) {
     return this.deleteById(id, null);

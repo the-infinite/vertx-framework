@@ -1,6 +1,6 @@
 package io.github.the_infinite.framework.data.seed;
 
-import org.hibernate.reactive.mutiny.Mutiny;
+import org.hibernate.Session;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
@@ -45,7 +45,7 @@ public abstract class RepositorySeeder<TModel extends BaseEntity, TModule extend
     return repository.deleteMany(null, options());
   }
 
-  protected <T> Future<T> transaction(@NotNull Function<Mutiny.Session, Future<T>> future) {
+  protected <T> Future<T> transaction(@NotNull Function<Session, Future<T>> future) {
     return repository.transaction(future);
   }
 }

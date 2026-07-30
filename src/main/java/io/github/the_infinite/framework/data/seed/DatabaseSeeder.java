@@ -1,6 +1,6 @@
 package io.github.the_infinite.framework.data.seed;
 
-import org.hibernate.reactive.mutiny.Mutiny;
+import org.hibernate.StatelessSession;
 
 import io.github.the_infinite.framework.data.PersistentRepository;
 import io.vertx.core.Future;
@@ -29,10 +29,10 @@ public interface DatabaseSeeder {
   /**
    * Creates the data managed by this seeder.
    */
-  Future<Void> seed(Mutiny.StatelessSession transaction);
+  Future<Void> seed(StatelessSession transaction);
 
   /**
    * Deletes the data managed by this seeder.
    */
-  Future<Void> delete(Mutiny.StatelessSession transaction);
+  Future<Void> delete(StatelessSession transaction);
 }

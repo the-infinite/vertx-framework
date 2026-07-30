@@ -2,20 +2,20 @@ package io.github.the_infinite.framework.data;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 
-import org.hibernate.reactive.mutiny.Mutiny;
+import org.hibernate.SessionFactory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.function.Function;
 
 import io.github.the_infinite.framework.data.types.ChangeResultModel;
 import io.github.the_infinite.framework.data.types.PaginatedResult;
 import io.github.the_infinite.framework.data.types.RepositoryOptions;
 import io.github.the_infinite.framework.utils.DataHelpers;
-import io.smallrye.mutiny.Uni;
 import io.vertx.core.Context;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
@@ -25,45 +25,50 @@ import jakarta.persistence.NoResultException;
 
 @SuppressWarnings("unused")
 public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession> permits StatefulRepositoryActor, StatelessRepositoryActor {
-  protected final Mutiny.SessionFactory sessionFactory;
+  protected final SessionFactory sessionFactory;
   protected final Class<TModel> modelType;
 
-  protected RepositoryActor(Mutiny.SessionFactory sessionFactory, Class<TModel> modelType) {
+  protected RepositoryActor(SessionFactory sessionFactory, Class<TModel> modelType) {
     this.sessionFactory = sessionFactory;
     this.modelType = modelType;
   }
 
   /**
-   * Internally used to wrap a Mutiny Uni into a Vert.x Future. This is necessary because the repository functions are
-   * designed to return Vert.x Futures, while the underlying database operations use Mutiny Unis. This helper function
-   * bridges the gap between these two asynchronous paradigms, allowing for seamless integration of Mutiny-based database
-   * operations within the Vert.x Future-based repository API.
+   * Internally used to run blocking Hibernate work in Vert.x while keeping the repository API Future-based.
    */
-  static <T> Future<T> wrap(Uni<T> uni) {
-    return wrap(uni, Vertx.currentContext());
+  static <T> Future<T> wrap(Supplier<T> supplier) {
+    return wrap(supplier, Vertx.currentContext());
   }
 
   @SuppressWarnings("unchecked")
-  static <T> Future<T> wrap(Uni<T> uni, @Nullable Context context) {
+  static <T> Future<T> wrap(Supplier<T> supplier, @Nullable Context context) {
     final var promise = Promise.<T>promise();
-    final Runnable subscribe = () -> uni.subscribe().with(promise::succeed, cause -> {
-      //? If this is simply that there was no result...
-      if (cause instanceof NoResultException noResultException) {
-        try {
-          promise.succeed((T) Optional.empty());
-        } catch (ClassCastException ignored) {
-          promise.succeed(null);
+    final Runnable execute = () -> {
+      try {
+        promise.succeed(supplier.get());
+      } catch (Throwable cause) {
+        if (cause instanceof NoResultException) {
+          try {
+            promise.succeed((T) Optional.empty());
+          } catch (ClassCastException ignored) {
+            promise.succeed(null);
+          }
+        } else {
+          promise.fail(cause);
         }
-      } else {
-        promise.fail(cause);
       }
-    });
+    };
 
-    if (context != null) {
-      context.runOnContext(_ -> subscribe.run());
-    } else {
-      subscribe.run();
+    final var usedContext = context == null ? Vertx.currentContext() : context;
+    if (usedContext == null) {
+      execute.run();
+      return promise.future();
     }
+
+    usedContext.owner().executeBlocking(() -> {
+      execute.run();
+      return null;
+    });
 
     return promise.future();
   }
@@ -424,7 +429,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   }
 
   public interface SessionBoundHandler<TSession, T> {
-    Uni<T> handle(TSession session, @Nullable Context context);
+    T handle(TSession session, @Nullable Context context);
   }
 
   public interface ChangeEffectorFunction<TEntity extends BaseEntity, TSession> {

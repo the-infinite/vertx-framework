@@ -129,11 +129,6 @@
       </exclusions>
     </dependency>
     <dependency>
-      <groupId>org.hibernate.reactive</groupId>
-      <artifactId>hibernate-reactive-core</artifactId>
-      <version>4.2.2.Final</version>
-    </dependency>
-    <dependency>
       <groupId>org.hibernate.orm</groupId>
       <artifactId>hibernate-core</artifactId>
       <version>7.2.2.Final</version>
