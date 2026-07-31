@@ -9,9 +9,10 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Supplier;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
+import io.github.the_infinite.framework.ConfigurationRegistrant;
 import io.github.the_infinite.framework.data.types.ChangeResultModel;
 import io.github.the_infinite.framework.data.types.PaginatedResult;
 import io.github.the_infinite.framework.data.types.RepositoryOptions;
@@ -21,7 +22,6 @@ import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import jakarta.persistence.LockModeType;
-import jakarta.persistence.NoResultException;
 
 @SuppressWarnings("unused")
 public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession> permits StatefulRepositoryActor, StatelessRepositoryActor {
@@ -40,36 +40,21 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
     return wrap(supplier, Vertx.currentContext());
   }
 
-  @SuppressWarnings("unchecked")
   static <T> Future<T> wrap(Supplier<T> supplier, @Nullable Context context) {
     final var promise = Promise.<T>promise();
     final Runnable execute = () -> {
       try {
         promise.succeed(supplier.get());
       } catch (Throwable cause) {
-        if (cause instanceof NoResultException) {
-          try {
-            promise.succeed((T) Optional.empty());
-          } catch (ClassCastException ignored) {
-            promise.succeed(null);
-          }
-        } else {
-          promise.fail(cause);
-        }
+        promise.fail(cause);
       }
     };
 
-    final var usedContext = context == null ? Vertx.currentContext() : context;
-    if (usedContext == null) {
-      execute.run();
-      return promise.future();
-    }
-
+    final var usedContext = context == null ? ConfigurationRegistrant.vertx().getOrCreateContext() : context;
     usedContext.owner().executeBlocking(() -> {
       execute.run();
       return null;
     });
-
     return promise.future();
   }
 
@@ -218,7 +203,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   abstract public Future<List<TModel>> createMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
   abstract public Future<Optional<TModel>> createOne(@NotNull TModel item,
-                                               @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
+                                                     @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
   // End region for create methods.
 
 

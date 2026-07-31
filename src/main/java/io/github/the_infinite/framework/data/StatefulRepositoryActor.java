@@ -18,8 +18,8 @@ import java.util.function.Function;
 import io.github.the_infinite.framework.data.types.ChangeResultModel;
 import io.github.the_infinite.framework.data.types.PaginatedResult;
 import io.github.the_infinite.framework.data.types.RepositoryOptions;
-import io.github.the_infinite.framework.utils.AtomHolder;
 import io.vertx.core.Future;
+import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.LockModeType;
@@ -27,6 +27,17 @@ import jakarta.persistence.LockModeType;
 public final class StatefulRepositoryActor<TModel extends BaseEntity> extends RepositoryActor<TModel, Session> {
   StatefulRepositoryActor(SessionFactory sessionFactory, Class<TModel> modelType) {
     super(sessionFactory, modelType);
+  }
+
+  private void prepareDetached(Session session, List<TModel> entities) {
+    for (final var entity : entities) {
+      this.prepareDetached(session, entity);
+    }
+  }
+
+  private void prepareDetached(Session session, TModel entity) {
+    Hibernate.initialize(entity);
+    session.detach(entity);
   }
 
   @Override
@@ -50,8 +61,57 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
 
   @Override
   public <ReturnType> Future<ReturnType> transaction(Function<Session, Future<ReturnType>> future) {
-    final var context = Vertx.currentContext();
-    return wrap(() -> sessionFactory.fromTransaction(session -> future.apply(session).toCompletionStage().toCompletableFuture().join()), context);
+    final var session = sessionFactory.openSession();
+    final var transaction = session.beginTransaction();
+    final var promise = Promise.<ReturnType>promise();
+    try {
+      future.apply(session)
+        .onFailure(cause -> {
+          try {
+            if (transaction.isActive()) {
+              transaction.rollback();
+            }
+          } catch (Throwable rollbackFailure) {
+            cause.addSuppressed(rollbackFailure);
+          } finally {
+            session.close();
+          }
+          promise.fail(cause);
+        })
+        .onSuccess(result -> {
+          try {
+            session.flush();
+            transaction.commit();
+            promise.complete(result);
+          } catch (Throwable cause) {
+            try {
+              if (transaction.isActive()) {
+                transaction.rollback();
+              }
+            } catch (Throwable rollbackFailure) {
+              cause.addSuppressed(rollbackFailure);
+            }
+            promise.fail(cause);
+          } finally {
+            session.close();
+          }
+        });
+    } catch (Throwable synchronous) {
+      try {
+        if (transaction.isActive()) {
+          transaction.rollback();
+        }
+      } catch (Throwable rollbackFailure) {
+        synchronous.addSuppressed(rollbackFailure);
+      }
+      try {
+        session.close();
+      } catch (Throwable closeFailure) {
+        synchronous.addSuppressed(closeFailure);
+      }
+      promise.fail(synchronous);
+    }
+    return promise.future();
   }
 
 
@@ -69,11 +129,10 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedCursor = options == null ? null : options.getCursor();
     final var usedLimit = options == null ? 30 : options.getLimit();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
-    final var countAtom = new AtomHolder<Long>();
     return this.getOrCreateSession(transaction, (session, _) -> {
       final var count = session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult();
-      countAtom.set(count);
       final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
+      this.prepareDetached(session, data);
       String nextCursor = null;
       try {
         if (data.size() == usedLimit) {
@@ -82,7 +141,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
       } catch (JsonProcessingException e) {
         throw new RuntimeException(e);
       }
-      return new PaginatedResult<>(data, usedLimit, countAtom.get(), usedCursor, nextCursor);
+      return new PaginatedResult<>(data, usedLimit, count, usedCursor, nextCursor);
     });
   }
 
@@ -91,7 +150,11 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedCursor = options == null ? null : options.getCursor();
     final var usedLimit = options == null ? 30 : options.getLimit();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
-    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList());
+    return this.getOrCreateSession(transaction, (session, _) -> {
+      final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
+      this.prepareDetached(session, data);
+      return data;
+    });
   }
 
   @Override
@@ -99,23 +162,25 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedCursor = options == null ? null : options.getCursor();
     final var usedLimit = options == null ? 30 : options.getLimit();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor).distinct();
-    return this.getOrCreateSession(transaction, (session, _) -> session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList());
+    return this.getOrCreateSession(transaction, (session, _) -> {
+      final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
+      this.prepareDetached(session, data);
+      return data;
+    });
   }
 
   @Override
   public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
     final var usedCursor = options == null ? null : options.getCursor();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
-    final var q  = usedFilters.select().query();
+    final var q = usedFilters.select().query();
     return this.getOrCreateSession(transaction, (session, _) -> {
       try {
         final var entity = session.createQuery(q).setMaxResults(1).getSingleResultOrNull();
         if (entity == null) {
           return Optional.empty();
         }
-        session.flush();
-        Hibernate.initialize(entity);
-        session.detach(entity);
+        this.prepareDetached(session, entity);
         return Optional.of(entity);
       } catch (EntityNotFoundException ignored) {
         return Optional.empty();
@@ -131,9 +196,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
         if (entity == null) {
           return Optional.empty();
         }
-        session.flush();
-        Hibernate.initialize(entity);
-        session.detach(entity);
+        this.prepareDetached(session, entity);
         return Optional.of(entity);
       } catch (EntityNotFoundException ignored) {
         return Optional.empty();
@@ -146,7 +209,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating many records."));
     }
-    return this.getOrCreateSession(transaction, (session, _) -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> {
       items.forEach(item -> {
         item.setUid(UUID.randomUUID());
         if (item instanceof BaseAuditableEntity<?> ae) {
@@ -164,7 +227,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating a record."));
     }
-    return this.getOrCreateSession(transaction, (session, _) -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> {
       item.setUid(UUID.randomUUID());
       if (item instanceof BaseAuditableEntity<?> ae) {
         ae.setCreatedBy(options.getUser());
@@ -252,7 +315,9 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedCursor = options == null ? null : options.getCursor();
     return this.getOrCreateTransaction(transaction, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.startDelete().where()), usedCursor);
-      return session.createMutationQuery(usedFilters.query()).executeUpdate();
+      final var result = session.createMutationQuery(usedFilters.query()).executeUpdate();
+      session.flush();
+      return result;
     });
   }
 
@@ -262,6 +327,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     return this.getOrCreateTransaction(transaction, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.startDelete().where()), usedCursor);
       final var data = session.createMutationQuery(usedFilters.query()).executeUpdate();
+      session.flush();
       return data > 0;
     });
   }

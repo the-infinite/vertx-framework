@@ -8,18 +8,14 @@ import org.hibernate.StatelessSession;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.function.Function;
 
 import io.github.the_infinite.framework.data.types.ChangeResultModel;
 import io.github.the_infinite.framework.data.types.PaginatedResult;
 import io.github.the_infinite.framework.data.types.RepositoryOptions;
-import io.github.the_infinite.framework.utils.AtomHolder;
 import io.vertx.core.Future;
+import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import jakarta.persistence.LockModeType;
 
@@ -51,8 +47,56 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
 
   @Override
   public <ReturnType> Future<ReturnType> transaction(Function<StatelessSession, Future<ReturnType>> future) {
-    final var context = Vertx.currentContext();
-    return wrap(() -> sessionFactory.fromStatelessTransaction(session -> future.apply(session).toCompletionStage().toCompletableFuture().join()), context);
+    final var session = sessionFactory.openStatelessSession();
+    final var transaction = session.beginTransaction();
+    final var promise = Promise.<ReturnType>promise();
+    try {
+      future.apply(session)
+        .onFailure(cause -> {
+          try {
+            if (transaction.isActive()) {
+              transaction.rollback();
+            }
+          } catch (Throwable rollbackFailure) {
+            cause.addSuppressed(rollbackFailure);
+          } finally {
+            session.close();
+          }
+          promise.fail(cause);
+        })
+        .onSuccess(result -> {
+          try {
+            transaction.commit();
+            promise.complete(result);
+          } catch (Throwable cause) {
+            try {
+              if (transaction.isActive()) {
+                transaction.rollback();
+              }
+            } catch (Throwable rollbackFailure) {
+              cause.addSuppressed(rollbackFailure);
+            }
+            promise.fail(cause);
+          } finally {
+            session.close();
+          }
+        });
+    } catch (Throwable synchronous) {
+      try {
+        if (transaction.isActive()) {
+          transaction.rollback();
+        }
+      } catch (Throwable rollbackFailure) {
+        synchronous.addSuppressed(rollbackFailure);
+      }
+      try {
+        session.close();
+      } catch (Throwable closeFailure) {
+        synchronous.addSuppressed(closeFailure);
+      }
+      promise.fail(synchronous);
+    }
+    return promise.future();
   }
 
   @Override
@@ -69,10 +113,8 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     final var usedCursor = options == null ? null : options.getCursor();
     final var usedLimit = options == null ? 30 : options.getLimit();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
-    final var countAtom = new AtomHolder<Long>();
     return this.getOrCreateSession(transaction, (session, _) -> {
       final var count = session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).setCacheMode(CacheMode.IGNORE).setCacheable(false).getSingleResult();
-      countAtom.set(count);
       final var data = session.createQuery(usedFilters.select().query()).setCacheMode(CacheMode.IGNORE).setCacheable(false).setMaxResults(usedLimit).getResultList();
       String nextCursor = null;
       try {
@@ -82,7 +124,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
       } catch (JsonProcessingException e) {
         throw new RuntimeException(e);
       }
-      return new PaginatedResult<>(data, usedLimit, countAtom.get(), usedCursor, nextCursor);
+      return new PaginatedResult<>(data, usedLimit, count, usedCursor, nextCursor);
     });
   }
 
@@ -125,7 +167,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating many records."));
     }
-    return this.getOrCreateSession(transaction, (session, _) -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> {
       items.forEach(item -> {
         item.setUid(UUID.randomUUID());
         if (item instanceof BaseAuditableEntity<?> ae) {
@@ -143,7 +185,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating a record."));
     }
-    return this.getOrCreateSession(transaction, (session, _) -> {
+    return this.getOrCreateTransaction(transaction, (session, _) -> {
       item.setUid(UUID.randomUUID());
       if (item instanceof BaseAuditableEntity<?> ae) {
         ae.setCreatedBy(options.getUser());

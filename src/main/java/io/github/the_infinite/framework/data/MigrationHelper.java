@@ -137,7 +137,7 @@ public class MigrationHelper {
 
     try {
       return RepositoryActor.wrap(() -> {
-        sessionFactory.fromSession(session -> {
+        sessionFactory.fromTransaction(session -> {
           for (final var command : initialMigrationScriptActions) {
             session.createNativeQuery(command).executeUpdate();
           }
