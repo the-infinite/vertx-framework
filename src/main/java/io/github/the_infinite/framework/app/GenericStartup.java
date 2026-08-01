@@ -79,7 +79,7 @@ public final class GenericStartup {
 
     //? Count the instances and compare with the CPU count. If the deployable count
     // exceeds the CPU count, we log a warning.
-    final var deployableCount = env.getServerCount() + env.getSocketCount() + env.getWorkerCount() + env.getConsumerCount();
+    final var deployableCount = env.getServerCount() + env.getSocketCount() + env.getWorkerCount();
 
     //? This is also fine.
     if (deployableCount > cpuCount) {
@@ -111,16 +111,19 @@ public final class GenericStartup {
     }
 
     //? If there are any consumers, we deploy them here.
-    if (env.getConsumerCount() > 0 && consumerRegistrar != null) {
+    if (consumerRegistrar != null) {
       final var consumerVertx = createVertxInstance(false, options);
 
-      //? Finally, deploy this verticle.
-      for(final var consumer : consumerRegistrar.consume(consumerVertx)) {
+      //? Finally, deploy these verticles. Each consumer in the list is a distinct
+      // consumer (with its own consumer tag), so it must be deployed exactly once.
+      // Deploying a single QueueConsumer with multiple instances would register the
+      // same consumer tag on the same connection multiple times, which RabbitMQ
+      // rejects with a 530 NOT_ALLOWED connection error.
+      for (final var consumer : consumerRegistrar.consume(consumerVertx)) {
         consumerVertx.deployVerticle(
           () -> new ConsumerVerticle<>(consumer),
           new DeploymentOptions().setHa(true)
             .setWorkerPoolName("Consumer-Pool")
-            .setInstances(env.getConsumerCount())
         ).onFailure(throwable -> globalConsole.error("Failed to deploy consumer: %s".formatted(throwable.getMessage())));
       }
     }

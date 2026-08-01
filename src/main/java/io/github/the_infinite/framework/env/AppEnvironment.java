@@ -29,7 +29,6 @@ public class AppEnvironment {
 
   //? For instances count
   private int serverCount;
-  private int consumerCount;
   private int workerCount;
   private int socketCount;
 
@@ -123,7 +122,6 @@ public class AppEnvironment {
 
     //? Third, for cluster member counts.
     var serverCount = instance.get("SERVER_COUNT", "1");
-    var consumerCount = instance.get("CONSUMER_COUNT", "0");
     var workerCount = instance.get("WORKER_COUNT", "0");
     var socketCount = instance.get("SOCKET_COUNT", "0");
     var socketPort = instance.get("SOCKET_PORT", "8081");
@@ -205,12 +203,6 @@ public class AppEnvironment {
     }
 
     try {
-      instance.consumerCount = Integer.parseInt(consumerCount);
-    } catch (NumberFormatException e) {
-      throw new IllegalStateException("Invalid CONSUMER_COUNT value: " + setupMode);
-    }
-
-    try {
       instance.serverCount = Integer.parseInt(serverCount);
     } catch (NumberFormatException e) {
       throw new IllegalStateException("Invalid SERVER_COUNT value: " + setupMode);
@@ -223,10 +215,6 @@ public class AppEnvironment {
 
   public int getServerCount() {
     return serverCount;
-  }
-
-  public int getConsumerCount() {
-    return consumerCount;
   }
 
   public int getWorkerCount() {
