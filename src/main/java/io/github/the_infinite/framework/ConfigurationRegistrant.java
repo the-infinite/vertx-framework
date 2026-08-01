@@ -4,6 +4,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -384,6 +386,15 @@ public class ConfigurationRegistrant {
     });
 
     return promise.future();
+  }
+
+  public Future<List<QueueConsumer<?, ?>>> consumer(List<QueueConsumer<?, ?>> consumers) {
+    return Future.all(
+      consumers.stream().map(this::consumer).toList()
+    ).compose(result -> {
+      final List<QueueConsumer<?, ?>> results = new ArrayList<>(result.list());
+      return Future.succeededFuture(results);
+    });
   }
 
   public <T, ResultType> Future<QueueConsumer<T, ResultType>> consumer(QueueConsumer<T, ResultType> consumer) {

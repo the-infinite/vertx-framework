@@ -29,15 +29,22 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     super(sessionFactory, modelType);
   }
 
-  private void prepareDetached(Session session, List<TModel> entities) {
+  private void prepareDetached(
+    Session session,
+    RepositoryOptions<TModel> options,
+    List<TModel> entities
+  ) {
     for (final var entity : entities) {
-      this.prepareDetached(session, entity);
+      this.prepareDetached(session, options, entity);
     }
   }
 
-  private void prepareDetached(Session session, TModel entity) {
+  private void prepareDetached(Session session, RepositoryOptions<TModel> options, TModel entity) {
     Hibernate.initialize(entity);
-    session.detach(entity);
+    final var detach = options != null && options.isDetach();
+    if (!session.getTransaction().isActive() || detach) {
+      session.detach(entity);
+    }
   }
 
   @Override
@@ -132,7 +139,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     return this.getOrCreateSession(transaction, (session, _) -> {
       final var count = session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult();
       final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
-      this.prepareDetached(session, data);
+      this.prepareDetached(session, options, data);
       String nextCursor = null;
       try {
         if (data.size() == usedLimit) {
@@ -152,7 +159,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
     return this.getOrCreateSession(transaction, (session, _) -> {
       final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
-      this.prepareDetached(session, data);
+      this.prepareDetached(session, options, data);
       return data;
     });
   }
@@ -164,7 +171,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor).distinct();
     return this.getOrCreateSession(transaction, (session, _) -> {
       final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
-      this.prepareDetached(session, data);
+      this.prepareDetached(session, options, data);
       return data;
     });
   }
@@ -180,7 +187,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
         if (entity == null) {
           return Optional.empty();
         }
-        this.prepareDetached(session, entity);
+        this.prepareDetached(session, options, entity);
         return Optional.of(entity);
       } catch (EntityNotFoundException ignored) {
         return Optional.empty();
@@ -196,7 +203,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
         if (entity == null) {
           return Optional.empty();
         }
-        this.prepareDetached(session, entity);
+        this.prepareDetached(session, new RepositoryOptions<>(), entity);
         return Optional.of(entity);
       } catch (EntityNotFoundException ignored) {
         return Optional.empty();

@@ -10,16 +10,22 @@ public final class RepositoryOptions<T> {
   private long userId;
   private int limit;
   private String cursor;
+  private boolean detach;
   private CorrelationContext correlation;
   private Position position;
 
-  public RepositoryOptions(Object user, CorrelationContext context) {
+  public RepositoryOptions(Object user, CorrelationContext context, boolean detach) {
     this.user = user;
     this.userId = user instanceof Number value ? value.longValue() : 0;
     this.correlation = context;
     this.limit = 30;
+    this.detach = detach;
     this.cursor = null;
     this.position = null;
+  }
+
+  public RepositoryOptions(Object user, CorrelationContext context) {
+    this(user, context, true);
   }
 
   public RepositoryOptions(long userId, CorrelationContext context) {
@@ -45,6 +51,11 @@ public final class RepositoryOptions<T> {
   public RepositoryOptions<T> setUser(Object user) {
     this.user = user;
     this.userId = user instanceof Number value ? value.longValue() : 0;
+    return this;
+  }
+
+  public RepositoryOptions<T> setDetach(boolean detach) {
+    this.detach = detach;
     return this;
   }
 

@@ -244,7 +244,7 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
   }
 
   private Future<Void> createEvent(MonitoringEvent.Level level, CorrelationContext context, LogEvent<Object> messageData, int attemptsLeft) {
-    return this.createEvent(level, null, context, messageData, attemptsLeft);
+    return this.createEvent(level, 0L, context, messageData, attemptsLeft);
   }
 
   @Override

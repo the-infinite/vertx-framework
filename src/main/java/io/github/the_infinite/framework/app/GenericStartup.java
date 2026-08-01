@@ -115,8 +115,14 @@ public final class GenericStartup {
       final var consumerVertx = createVertxInstance(false, options);
 
       //? Finally, deploy this verticle.
-      consumerVertx.deployVerticle(() -> new ConsumerVerticle<>(consumerRegistrar.consume(consumerVertx)),
-        new DeploymentOptions().setHa(true).setWorkerPoolName("Consumer-Pool").setInstances(env.getConsumerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy consumer: %s".formatted(throwable.getMessage())));
+      for(final var consumer : consumerRegistrar.consume(consumerVertx)) {
+        consumerVertx.deployVerticle(
+          () -> new ConsumerVerticle<>(consumer),
+          new DeploymentOptions().setHa(true)
+            .setWorkerPoolName("Consumer-Pool")
+            .setInstances(env.getConsumerCount())
+        ).onFailure(throwable -> globalConsole.error("Failed to deploy consumer: %s".formatted(throwable.getMessage())));
+      }
     }
 
     //? If this is a socket...
@@ -124,7 +130,12 @@ public final class GenericStartup {
       final var socketVertx = createVertxInstance(false, options);
 
       //? Finally, deploy this verticle.
-      socketVertx.deployVerticle(SocketVerticle::new, new DeploymentOptions().setHa(true).setWorkerPoolName("Socket-Pool").setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getWorkerCount())).setInstances(env.getWorkerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy socket server: %s".formatted(throwable.getMessage())));
+      socketVertx.deployVerticle(
+        SocketVerticle::new,
+        new DeploymentOptions().setHa(true).setWorkerPoolName("Socket-Pool")
+          .setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getWorkerCount())
+          ).setInstances(env.getWorkerCount())
+      ).onFailure(throwable -> globalConsole.error("Failed to deploy socket server: %s".formatted(throwable.getMessage())));
     }
   }
 }
