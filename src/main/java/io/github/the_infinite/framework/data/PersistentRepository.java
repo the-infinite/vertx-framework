@@ -132,7 +132,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    */
   public Future<Boolean> doesTableExist() {
     final var tableData = tableName();
-    if(tableData.isEmpty()) {
+    if (tableData.isEmpty()) {
       return Future.succeededFuture(false);
     }
     final var tableName = tableData.get();
@@ -172,14 +172,19 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * Theoretically, you could implement your own checkpointing system using save-points
    * by calling this function inside itself, but that is not very pretty.
    *
+   * @param options      The repository options, including the acting user and correlation context for this transaction.
    * @param future       A callback that returns a future to execute inside the transaction. If the future fails, the
    *                     transaction is rolled back. If it succeeds, the transaction is committed. The session provided inside
    *                     the callback is the transactional session. It should be used in any repository APIs inside the function.
    * @param <ReturnType> The result of the future.
    * @return A future that resolves to use a database transaction
    */
+  public <ReturnType> Future<ReturnType> transaction(@NotNull RepositoryOptions<TModel> options, Function<Session, Future<ReturnType>> future) {
+    return statefulRepositoryActor.transaction(options, future);
+  }
+
   public <ReturnType> Future<ReturnType> transaction(Function<Session, Future<ReturnType>> future) {
-    return statefulRepositoryActor.transaction(future);
+    return this.transaction(new RepositoryOptions<>(null), future);
   }
 
   /**
@@ -204,7 +209,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
     return this.sessionFactory;
   }
 
-  public Future<Long> getCount(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
+  public Future<Long> getCount(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.getCount(filter, options, transaction);
   }
 
@@ -226,29 +231,15 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction - Optional transaction/database context. Defaults to the repository database connection.
    * @return A paginated result containing the items, total count, limit, current cursor, and next cursor (if any).
    */
-  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
+  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.getPaginatedView(filter, options, transaction);
   }
 
   /**
    * @see #getPaginatedView(QueryData, RepositoryOptions, Session)
    */
-  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
+  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
     return this.getPaginatedView(filter, options, null);
-  }
-
-  /**
-   * @see #getPaginatedView(QueryData, RepositoryOptions, Session)
-   */
-  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter) {
-    return this.getPaginatedView(filter, null);
-  }
-
-  /**
-   * @see #getPaginatedView(QueryData, RepositoryOptions, Session)
-   */
-  public Future<PaginatedResult<TModel>> getPaginatedView() {
-    return this.getPaginatedView(null);
   }
 
   /**
@@ -267,29 +258,15 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction The optional transactional session to use for the query. If null, a new session is created.
    * @return A `Future` that resolves to a list of entities matching the criteria.
    */
-  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
+  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return this.statefulRepositoryActor.getMany(filter, options, transaction);
   }
 
   /**
    * @see #getMany(QueryData, RepositoryOptions, Session)
    */
-  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
+  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
     return this.getMany(filter, options, null);
-  }
-
-  /**
-   * @see #getMany(QueryData, RepositoryOptions, Session)
-   */
-  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter) {
-    return this.getMany(filter, null);
-  }
-
-  /**
-   * @see #getMany(QueryData, RepositoryOptions, Session)
-   */
-  public Future<List<TModel>> getMany() {
-    return this.getMany(null);
   }
 
   /**
@@ -310,29 +287,15 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    *                    the repository database connection.
    * @return A promise resolving to an array of unique values for the specified column.
    */
-  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
+  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.getDistinctRows(filter, options, transaction);
   }
 
   /**
    * @see #getDistinctRows(QueryData, RepositoryOptions, Session)
    */
-  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
+  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
     return this.getDistinctRows(filter, options, null);
-  }
-
-  /**
-   * @see #getDistinctRows(QueryData, RepositoryOptions, Session)
-   */
-  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter) {
-    return this.getDistinctRows(filter, null);
-  }
-
-  /**
-   * @see #getDistinctRows(QueryData, RepositoryOptions, Session)
-   */
-  public Future<List<TModel>> getDistinctRows() {
-    return this.getDistinctRows(null);
   }
 
   /**
@@ -343,29 +306,15 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @param transaction Optional transaction context for the database operation
    * @return A future that resolves to the found entity or null if no entity matches the criteria
    */
-  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
+  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return this.statefulRepositoryActor.getOne(filter, options, transaction);
   }
 
   /**
    * @see #getOne(QueryData, RepositoryOptions, Session)
    */
-  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
+  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
     return this.getOne(filter, options, null);
-  }
-
-  /**
-   * @see #getOne(QueryData, RepositoryOptions, Session)
-   */
-  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter) {
-    return this.getOne(filter, null);
-  }
-
-  /**
-   * @see #getOne(QueryData, RepositoryOptions, Session)
-   */
-  public Future<Optional<TModel>> getOne() {
-    return this.getOne(null);
   }
 
   /**
@@ -373,30 +322,31 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    *
    * @param id          - The primary key value to search for
    * @param lockMode    what kind of lock are we acquiring?
+   * @param options     The repository options, including the acting user and correlation context.
    * @param transaction Optional database transaction to execute the query within
    * @return A promise that resolves to the found entity or null if no entity matches the given id
    */
-  public Future<Optional<TModel>> getById(long id, LockModeType lockMode, @Nullable Session transaction) {
-    return this.statefulRepositoryActor.getById(id, lockMode, transaction);
+  public Future<Optional<TModel>> getById(long id, LockModeType lockMode, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    return this.statefulRepositoryActor.getById(id, lockMode, options, transaction);
   }
 
   /**
    * Retrieves a single entity by its primary key identifier.
    *
    * @param id          - The primary key value to search for
-   * @param transaction Optional database transaction to execute the query within
+   * @param options     The repository options, including the acting user and correlation context.
    * @return A promise that resolves to the found entity or null if no entity matches the given id
-   * @see #getById(long, LockModeType, Session)
+   * @see #getById(long, LockModeType, RepositoryOptions, Session)
    */
-  public Future<Optional<TModel>> getById(long id, @Nullable Session transaction) {
-    return this.getById(id, LockModeType.OPTIMISTIC, transaction);
+  public Future<Optional<TModel>> getById(long id, @NotNull RepositoryOptions<TModel> options) {
+    return this.getById(id, LockModeType.OPTIMISTIC, options, null);
   }
 
-  /**
-   * @see #getById(long, LockModeType, Session)
-   */
-  public Future<Optional<TModel>> getById(long id) {
-    return this.getById(id, null);
+
+  public Future<Optional<TModel>> getById(long id,
+                                          @NotNull RepositoryOptions<TModel> options,
+                                          @Nullable Session transaction) {
+    return this.getById(id, LockModeType.OPTIMISTIC, options, transaction);
   }
 
   /**
@@ -526,6 +476,60 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
   }
 
   /**
+   * Upserts multiple entities in the repository, inserting those without an existing row and updating the rest.
+   * <p>
+   * This method checks each item's primary key against the database and either inserts it as new or
+   * merges the changes over the existing row. It uses the provided transaction session if available,
+   * or creates a new session for the operation.
+   * <p>
+   * Notes:
+   * - If the transaction session is provided, it will be reused for the operation.
+   * - If the operation fails, the promise is marked as failed with the corresponding cause.
+   *
+   * @param items       The list of entities to upsert.
+   * @param options     The repository options, including the acting user for audit fields.
+   * @param transaction The optional transactional session to use for the operation. If null, a new session is created.
+   * @return A `Future` that resolves to the list of upserted entities.
+   */
+  public Future<List<TModel>> upsertMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options, @Nullable StatelessSession transaction) {
+    return statelessRepositoryActor.upsertMany(items, options, transaction);
+  }
+
+  /**
+   * @see #upsertMany(List, RepositoryOptions, StatelessSession)
+   */
+  public Future<List<TModel>> upsertMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options) {
+    return this.upsertMany(items, options, null);
+  }
+
+  /**
+   * Upserts a single entity in the repository, inserting it if no row exists and merging changes otherwise.
+   * <p>
+   * This method checks the item's primary key against the database and either persists it as new or
+   * merges the changes over the existing row. It uses the given transaction session if available,
+   * or creates a new session for the operation.
+   * <p>
+   * Notes:
+   * - If the transaction session is provided, it will be reused for the operation.
+   * - If the operation fails, the promise is marked as failed with the corresponding cause.
+   *
+   * @param item        The entity to upsert.
+   * @param options     The repository options, including the acting user for audit fields.
+   * @param transaction The optional transactional session to use for the operation. If null, a new session is created.
+   * @return A `Future` that resolves to an `Optional` containing the upserted entity.
+   */
+  public Future<Optional<TModel>> upsertOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    return this.statefulRepositoryActor.upsertOne(item, options, transaction);
+  }
+
+  /**
+   * @see #upsertOne(BaseEntity, RepositoryOptions, Session)
+   */
+  public Future<Optional<TModel>> upsertOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options) {
+    return this.upsertOne(item, options, null);
+  }
+
+  /**
    * Deletes multiple entities from the repository that match the provided filter criteria.
    * <p>
    * This method retrieves a list of entities based on the given filter and removes them from the database.
@@ -543,7 +547,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * entities.
    */
   public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter,
-                                    @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
+                                    @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.deleteMany(filter, options, transaction);
   }
 
@@ -551,22 +555,8 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @see #deleteMany(DeleteQueryData, RepositoryOptions, Session)
    */
   public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter,
-                                    @Nullable RepositoryOptions<TModel> options) {
+                                    @NotNull RepositoryOptions<TModel> options) {
     return this.deleteMany(filter, options, null);
-  }
-
-  /**
-   * @see #deleteMany(DeleteQueryData, RepositoryOptions, Session)
-   */
-  public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter) {
-    return this.deleteMany(filter, null);
-  }
-
-  /**
-   * @see #deleteMany(DeleteQueryData, RepositoryOptions, Session)
-   */
-  public Future<Integer> deleteMany() {
-    return this.deleteMany(null);
   }
 
   /**
@@ -586,7 +576,7 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @return A `Future` that resolves whether this was deleted successfully.
    */
   public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter,
-                                   @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
+                                   @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     return statefulRepositoryActor.deleteOne(filter, options, transaction);
   }
 
@@ -594,15 +584,8 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @see #deleteOne(DeleteQueryData, RepositoryOptions, Session)
    */
   public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter,
-                                   @Nullable RepositoryOptions<TModel> options) {
+                                   @NotNull RepositoryOptions<TModel> options) {
     return this.deleteOne(filter, options, null);
-  }
-
-  /**
-   * @see #deleteOne(DeleteQueryData, RepositoryOptions, Session)
-   */
-  public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter) {
-    return this.deleteOne(filter, null);
   }
 
   /**
@@ -626,13 +609,6 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
   }
 
   /**
-   * @see #deleteOne(DeleteQueryData, RepositoryOptions, Session)
-   */
-  public Future<Boolean> deleteOne() {
-    return this.deleteOne(null);
-  }
-
-  /**
    * Deletes a single entity from the repository by its primary key identifier.
    * <p>
    * This method retrieves an entity based on the provided `id` and removes it from the database.
@@ -643,17 +619,18 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * - The operation uses `LockModeType.OPTIMISTIC_FORCE_INCREMENT` to ensure optimistic locking.
    *
    * @param id          The primary key identifier of the entity to delete.
+   * @param options     The repository options, including the acting user and correlation context.
    * @param transaction The optional transactional session to use for the operation. If null, a new session is created.
    * @return A `Future` that resolves to an `Optional` containing the deleted entity or an empty `Optional` if no entity was deleted.
    */
-  public Future<Optional<TModel>> deleteById(long id, @Nullable Session transaction) {
-    return statefulRepositoryActor.deleteById(id, transaction);
+  public Future<Optional<TModel>> deleteById(long id, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    return statefulRepositoryActor.deleteById(id, options, transaction);
   }
 
   /**
-   * @see #deleteById(long, Session)
+   * @see #deleteById(long, RepositoryOptions, Session)
    */
-  public Future<Optional<TModel>> deleteById(long id) {
-    return this.deleteById(id, null);
+  public Future<Optional<TModel>> deleteById(long id, @NotNull RepositoryOptions<TModel> options) {
+    return this.deleteById(id, options, null);
   }
 }

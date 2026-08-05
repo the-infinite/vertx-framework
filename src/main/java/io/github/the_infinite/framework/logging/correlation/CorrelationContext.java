@@ -1,8 +1,11 @@
 package io.github.the_infinite.framework.logging.correlation;
 
+import org.hibernate.Session;
+import org.hibernate.SessionFactory;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import io.github.the_infinite.framework.middleware.GeneralMiddlewares;
 import io.github.the_infinite.framework.response.ErrorResult;
@@ -20,6 +23,7 @@ public final class CorrelationContext {
   private static final String CONTEXT_KEY = "CORRELATION_ID";
   private static final String CONTEXT_USER = "TVT_USER_ID";
   private final RoutingContext routingContext;
+  private final AtomicReference<Session> session;
   private final Context vertxContext;
 
   //? This is fine too.
@@ -34,6 +38,7 @@ public final class CorrelationContext {
     //? This is fine too.
     this.routingContext = routingContext;
     this.vertxContext = null;
+    this.session = new AtomicReference<>(null);
   }
 
   private CorrelationContext(@NotNull Context vertxContext) {
@@ -47,6 +52,7 @@ public final class CorrelationContext {
     //? This is fine too.
     this.routingContext = null;
     this.vertxContext = vertxContext;
+    this.session = new AtomicReference<>(null);
   }
 
   /// Build a correlation context using a routing context.
@@ -141,6 +147,37 @@ public final class CorrelationContext {
       throw new UnsupportedOperationException("Cannot get request parameters because this is not a correlation group of a HTTP request");
     }
     return routingContext.get(ValidationHandler.REQUEST_CONTEXT_KEY);
+  }
+
+  //? Getting the correlation context here as needed.
+
+  /**
+   * Cleans up the correlation context. This will close any running database sessions if
+   * they exist.
+   */
+  public void cleanup() {
+    if (session == null || session.get() == null) {
+      return;
+    }
+
+    final var foundSession = session.get();
+    foundSession.flush();
+    foundSession.close();
+    session.set(null);
+  }
+
+  /**
+   * Gets the session from the correlation context. If the session is not set, it will be
+   * created.
+   */
+  public @NotNull Session getSession(SessionFactory factory) {
+    if (session.get() != null) {
+      return session.get();
+    }
+
+    final var foundSession = factory.openSession();
+    session.set(foundSession);
+    return foundSession;
   }
 
 

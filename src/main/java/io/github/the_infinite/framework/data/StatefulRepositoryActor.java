@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import org.hibernate.Hibernate;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
+import org.hibernate.Transaction;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -48,51 +49,112 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  protected <T> Future<T> getOrCreateSession(@Nullable Session transaction, SessionBoundHandler<Session, T> handler) {
+  protected <T> Future<T> getOrCreateSession(@Nullable Session transaction, @Nullable RepositoryOptions<TModel> options, SessionBoundHandler<Session, T> handler) {
     final var context = Vertx.currentContext();
     if (transaction != null) {
       return wrap(() -> handler.handle(transaction, context), context);
     }
 
+    final var correlation = options == null ? null : options.getCorrelation();
+    if (correlation != null) {
+      return wrap(() -> handler.handle(correlation.getSession(sessionFactory), context), context);
+    }
+
     return wrap(() -> sessionFactory.fromSession(session -> handler.handle(session, context)), context);
   }
 
-  private <T> Future<T> getOrCreateTransaction(@Nullable Session transaction, SessionBoundHandler<Session, T> handler) {
+  private <T> Future<T> getOrCreateTransaction(@Nullable Session transaction, @Nullable RepositoryOptions<TModel> options, SessionBoundHandler<Session, T> handler) {
     if (transaction != null) {
-      return this.getOrCreateSession(transaction, handler);
+      return this.getOrCreateSession(transaction, options, handler);
     }
 
     final var context = Vertx.currentContext();
+    final var correlation = options == null ? null : options.getCorrelation();
+    if (correlation != null) {
+      return wrap(() -> {
+        final var session = correlation.getSession(sessionFactory);
+        final var sessionTransaction = session.getTransaction();
+        final var ownsTransaction = !sessionTransaction.isActive();
+        if (ownsTransaction) {
+          sessionTransaction.begin();
+        }
+        try {
+          final var result = handler.handle(session, context);
+          if (ownsTransaction) {
+            session.flush();
+            sessionTransaction.commit();
+          }
+          return result;
+        } catch (Throwable cause) {
+          if (ownsTransaction && sessionTransaction.isActive()) {
+            try {
+              sessionTransaction.rollback();
+            } catch (Throwable rollbackFailure) {
+              cause.addSuppressed(rollbackFailure);
+            }
+          }
+          throw cause;
+        }
+      }, context);
+    }
+
     return wrap(() -> sessionFactory.fromTransaction(session -> handler.handle(session, context)), context);
   }
 
   @Override
-  public <ReturnType> Future<ReturnType> transaction(Function<Session, Future<ReturnType>> future) {
+  public <ReturnType> Future<ReturnType> transaction(@NotNull RepositoryOptions<TModel> options, Function<Session, Future<ReturnType>> future) {
+    final var correlation = options.getCorrelation();
+
+    //? If we are inside a correlation context, reuse its request-scoped session so that
+    //? the surrounding request can commit/rollback the work as one unit.
+    if (correlation != null) {
+      final var session = correlation.getSession(sessionFactory);
+      final var transaction = session.getTransaction();
+      final var ownsTransaction = !transaction.isActive();
+      return this.runInTransaction(session, transaction, ownsTransaction, future);
+    }
+
+    //? Otherwise, fall back to a dedicated session owned entirely by this call.
     final var session = sessionFactory.openSession();
-    final var transaction = session.beginTransaction();
+    return this.runInTransaction(session, session.getTransaction(), true, future);
+  }
+
+  public <ReturnType> Future<ReturnType> transaction(Function<Session, Future<ReturnType>> future) {
+    return this.transaction(new RepositoryOptions<>(null), future);
+  }
+
+  private <ReturnType> Future<ReturnType> runInTransaction(Session session, Transaction transaction, boolean ownsTransaction, Function<Session, Future<ReturnType>> future) {
     final var promise = Promise.<ReturnType>promise();
     try {
+      if (ownsTransaction) {
+        transaction.begin();
+      }
+
       future.apply(session)
         .onFailure(cause -> {
           try {
-            if (transaction.isActive()) {
+            if (ownsTransaction && transaction.isActive()) {
               transaction.rollback();
             }
           } catch (Throwable rollbackFailure) {
             cause.addSuppressed(rollbackFailure);
           } finally {
-            session.close();
+            if (ownsTransaction) {
+              session.close();
+            }
           }
           promise.fail(cause);
         })
         .onSuccess(result -> {
           try {
-            session.flush();
-            transaction.commit();
+            if (ownsTransaction) {
+              session.flush();
+              transaction.commit();
+            }
             promise.complete(result);
           } catch (Throwable cause) {
             try {
-              if (transaction.isActive()) {
+              if (ownsTransaction && transaction.isActive()) {
                 transaction.rollback();
               }
             } catch (Throwable rollbackFailure) {
@@ -100,19 +162,23 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
             }
             promise.fail(cause);
           } finally {
-            session.close();
+            if (ownsTransaction) {
+              session.close();
+            }
           }
         });
     } catch (Throwable synchronous) {
       try {
-        if (transaction.isActive()) {
+        if (ownsTransaction && transaction.isActive()) {
           transaction.rollback();
         }
       } catch (Throwable rollbackFailure) {
         synchronous.addSuppressed(rollbackFailure);
       }
       try {
-        session.close();
+        if (ownsTransaction) {
+          session.close();
+        }
       } catch (Throwable closeFailure) {
         synchronous.addSuppressed(closeFailure);
       }
@@ -123,20 +189,20 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
 
 
   @Override
-  public Future<Long> getCount(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
-    final var usedCursor = options == null ? null : options.getCursor();
-    return this.getOrCreateSession(transaction, (session, _) -> {
+  public Future<Long> getCount(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    final var usedCursor = options.getCursor();
+    return this.getOrCreateSession(transaction, options, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, start()), usedCursor);
       return session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult();
     });
   }
 
   @Override
-  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
-    final var usedCursor = options == null ? null : options.getCursor();
-    final var usedLimit = options == null ? 30 : options.getLimit();
+  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    final var usedCursor = options.getCursor();
+    final var usedLimit = options.getLimit();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
-    return this.getOrCreateSession(transaction, (session, _) -> {
+    return this.getOrCreateSession(transaction, options, (session, _) -> {
       final var count = session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult();
       final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
       this.prepareDetached(session, options, data);
@@ -153,11 +219,11 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
-    final var usedCursor = options == null ? null : options.getCursor();
-    final var usedLimit = options == null ? 30 : options.getLimit();
+  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    final var usedCursor = options.getCursor();
+    final var usedLimit = options.getLimit();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
-    return this.getOrCreateSession(transaction, (session, _) -> {
+    return this.getOrCreateSession(transaction, options, (session, _) -> {
       final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
       this.prepareDetached(session, options, data);
       return data;
@@ -165,11 +231,11 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
-    final var usedCursor = options == null ? null : options.getCursor();
-    final var usedLimit = options == null ? 30 : options.getLimit();
+  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    final var usedCursor = options.getCursor();
+    final var usedLimit = options.getLimit();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor).distinct();
-    return this.getOrCreateSession(transaction, (session, _) -> {
+    return this.getOrCreateSession(transaction, options, (session, _) -> {
       final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
       this.prepareDetached(session, options, data);
       return data;
@@ -177,11 +243,11 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
-    final var usedCursor = options == null ? null : options.getCursor();
+  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    final var usedCursor = options.getCursor();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
     final var q = usedFilters.select().query();
-    return this.getOrCreateSession(transaction, (session, _) -> {
+    return this.getOrCreateSession(transaction, options, (session, _) -> {
       try {
         final var entity = session.createQuery(q).setMaxResults(1).getSingleResultOrNull();
         if (entity == null) {
@@ -196,14 +262,14 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  public Future<Optional<TModel>> getById(long id, LockModeType lockMode, @Nullable Session transaction) {
-    return this.getOrCreateSession(transaction, (session, _) -> {
+  public Future<Optional<TModel>> getById(long id, LockModeType lockMode, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    return this.getOrCreateSession(transaction, options, (session, _) -> {
       try {
         final var entity = session.find(modelType, id, lockMode);
         if (entity == null) {
           return Optional.empty();
         }
-        this.prepareDetached(session, new RepositoryOptions<>(), entity);
+        this.prepareDetached(session, options, entity);
         return Optional.of(entity);
       } catch (EntityNotFoundException ignored) {
         return Optional.empty();
@@ -216,7 +282,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating many records."));
     }
-    return this.getOrCreateTransaction(transaction, (session, _) -> {
+    return this.getOrCreateTransaction(transaction, options, (session, _) -> {
       items.forEach(item -> {
         item.setUid(UUID.randomUUID());
         if (item instanceof BaseAuditableEntity<?> ae) {
@@ -234,7 +300,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when creating a record."));
     }
-    return this.getOrCreateTransaction(transaction, (session, _) -> {
+    return this.getOrCreateTransaction(transaction, options, (session, _) -> {
       item.setUid(UUID.randomUUID());
       if (item instanceof BaseAuditableEntity<?> ae) {
         ae.setCreatedBy(options.getUser());
@@ -246,6 +312,52 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
+  public Future<List<TModel>> upsertMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
+      return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when upserting many records."));
+    }
+    return this.getOrCreateTransaction(transaction, options, (session, _) -> {
+      final var result = new ArrayList<TModel>(items.size());
+      for (final var item : items) {
+        result.add(this.upsertEntity(session, options, item));
+      }
+      session.flush();
+      return result;
+    });
+  }
+
+  @Override
+  public Future<Optional<TModel>> upsertOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
+      return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when upserting a record."));
+    }
+    return this.getOrCreateTransaction(transaction, options, (session, _) -> {
+      final var upserted = this.upsertEntity(session, options, item);
+      session.flush();
+      return Optional.of(upserted);
+    });
+  }
+
+  private TModel upsertEntity(Session session, RepositoryOptions<TModel> options, TModel item) {
+    final var existing = item.getId() == null ? null : session.find(modelType, item.getId());
+    if (existing == null) {
+      if (item.getUid() == null) {
+        item.setUid(UUID.randomUUID());
+      }
+      if (item instanceof BaseAuditableEntity<?> ae) {
+        ae.setCreatedBy(options.getUser());
+        ae.setUpdatedBy(options.getUser());
+      }
+      session.persist(item);
+      return item;
+    }
+    if (item instanceof BaseAuditableEntity<?> ae) {
+      ae.setUpdatedBy(options.getUser());
+    }
+    return session.merge(item);
+  }
+
+  @Override
   public Future<ChangeResultModel<TModel>> updateMany(@Nullable QueryData<TModel> filter, @NotNull ChangeEffectorFunction<TModel, Session> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when updating many records."));
@@ -253,7 +365,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     final var usedCursor = options.getCursor();
     final var usedLimit = options.getLimit();
     final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start().where()), usedCursor);
-    return this.getOrCreateTransaction(transaction, (session, _) -> {
+    return this.getOrCreateTransaction(transaction, options, (session, _) -> {
       final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
       final var changeList = new ArrayList<TModel>();
       for (final var entity : data) {
@@ -278,7 +390,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when updating a record."));
     }
-    return this.getOrCreateTransaction(transaction, (session, _) -> {
+    return this.getOrCreateTransaction(transaction, options, (session, _) -> {
       final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getSingleResultOrNull();
       if (data == null) {
         return Optional.empty();
@@ -300,7 +412,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     if (options.getUser() == null && BaseAuditableEntity.class.isAssignableFrom(this.modelType)) {
       return Future.failedFuture(new IllegalArgumentException("Repository options cannot be null when updating a record."));
     }
-    return this.getOrCreateTransaction(transaction, (session, _) -> {
+    return this.getOrCreateTransaction(transaction, options, (session, _) -> {
       final var data = session.find(modelType, id);
       if (data == null) {
         return Optional.empty();
@@ -318,9 +430,9 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
-    final var usedCursor = options == null ? null : options.getCursor();
-    return this.getOrCreateTransaction(transaction, (session, _) -> {
+  public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    final var usedCursor = options.getCursor();
+    return this.getOrCreateTransaction(transaction, options, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.startDelete().where()), usedCursor);
       final var result = session.createMutationQuery(usedFilters.query()).executeUpdate();
       session.flush();
@@ -329,9 +441,9 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable Session transaction) {
-    final var usedCursor = options == null ? null : options.getCursor();
-    return this.getOrCreateTransaction(transaction, (session, _) -> {
+  public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    final var usedCursor = options.getCursor();
+    return this.getOrCreateTransaction(transaction, options, (session, _) -> {
       final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.startDelete().where()), usedCursor);
       final var data = session.createMutationQuery(usedFilters.query()).executeUpdate();
       session.flush();
@@ -340,8 +452,8 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  public Future<Optional<TModel>> deleteById(long id, @Nullable Session transaction) {
-    return this.getOrCreateTransaction(transaction, (session, _) -> {
+  public Future<Optional<TModel>> deleteById(long id, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    return this.getOrCreateTransaction(transaction, options, (session, _) -> {
       final var data = session.find(modelType, id);
       if (data == null) {
         return Optional.empty();

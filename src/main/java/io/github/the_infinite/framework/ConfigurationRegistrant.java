@@ -89,6 +89,14 @@ public class ConfigurationRegistrant {
     throw new IllegalStateException("No current Vertx context available.");
   }
 
+  public static Context context() {
+    return vertx().getOrCreateContext();
+  }
+
+  public static CorrelationContext scope() {
+    return CorrelationContext.from(context());
+  }
+
   public static void setUp(Vertx vertx, @Nullable String envFile) throws IllegalArgumentException {
     //? If this already exists...
     if (instances.containsKey(vertx)) {

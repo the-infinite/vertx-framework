@@ -10,6 +10,7 @@ import java.lang.reflect.Proxy;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import io.github.the_infinite.framework.data.types.RepositoryOptions;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 
@@ -24,7 +25,7 @@ class RepositoryTransactionTest {
     final var actor = new StatefulRepositoryActor<BaseEntity>(sessionFactory(Session.class, commits, new AtomicInteger(), new AtomicInteger()), BaseEntity.class);
     final var outcome = new AtomicReference<AsyncResult<String>>();
 
-    actor.transaction(ignored -> Future.succeededFuture("complete")).onComplete(outcome::set);
+    actor.transaction(new RepositoryOptions<>(), ignored -> Future.succeededFuture("complete")).onComplete(outcome::set);
 
     assertEquals(1, commits.get());
     assertNotNull(outcome.get());
@@ -40,7 +41,7 @@ class RepositoryTransactionTest {
     final var actor = new StatefulRepositoryActor<BaseEntity>(sessionFactory(Session.class, commits, rollbacks, closes), BaseEntity.class);
     final var outcome = new AtomicReference<AsyncResult<String>>();
 
-    actor.transaction(ignored -> Future.<String>failedFuture("boom")).onComplete(outcome::set);
+    actor.transaction(new RepositoryOptions<>(), ignored -> Future.<String>failedFuture("boom")).onComplete(outcome::set);
 
     assertEquals(0, commits.get());
     assertEquals(1, rollbacks.get());
@@ -57,7 +58,7 @@ class RepositoryTransactionTest {
     final var actor = new StatefulRepositoryActor<BaseEntity>(sessionFactory(Session.class, commits, rollbacks, closes), BaseEntity.class);
     final var outcome = new AtomicReference<AsyncResult<String>>();
 
-    actor.transaction((java.util.function.Function<Session, Future<String>>) ignored -> {
+    actor.transaction(new RepositoryOptions<>(), (java.util.function.Function<Session, Future<String>>) ignored -> {
       throw new IllegalStateException("sync");
     }).onComplete(outcome::set);
 
@@ -74,7 +75,7 @@ class RepositoryTransactionTest {
     final var actor = new StatelessRepositoryActor<BaseEntity>(sessionFactory(StatelessSession.class, commits, new AtomicInteger(), new AtomicInteger()), BaseEntity.class);
     final var outcome = new AtomicReference<AsyncResult<String>>();
 
-    actor.transaction(ignored -> Future.succeededFuture("complete")).onComplete(outcome::set);
+    actor.transaction(new RepositoryOptions<>(), ignored -> Future.succeededFuture("complete")).onComplete(outcome::set);
 
     assertEquals(1, commits.get());
     assertNotNull(outcome.get());
@@ -90,7 +91,7 @@ class RepositoryTransactionTest {
     final var actor = new StatelessRepositoryActor<BaseEntity>(sessionFactory(StatelessSession.class, commits, rollbacks, closes), BaseEntity.class);
     final var outcome = new AtomicReference<AsyncResult<String>>();
 
-    actor.transaction(ignored -> Future.<String>failedFuture("boom")).onComplete(outcome::set);
+    actor.transaction(new RepositoryOptions<>(), ignored -> Future.<String>failedFuture("boom")).onComplete(outcome::set);
 
     assertEquals(0, commits.get());
     assertEquals(1, rollbacks.get());
@@ -107,7 +108,7 @@ class RepositoryTransactionTest {
     final var actor = new StatelessRepositoryActor<BaseEntity>(sessionFactory(StatelessSession.class, commits, rollbacks, closes), BaseEntity.class);
     final var outcome = new AtomicReference<AsyncResult<String>>();
 
-    actor.transaction((java.util.function.Function<StatelessSession, Future<String>>) ignored -> {
+    actor.transaction(new RepositoryOptions<>(), (java.util.function.Function<StatelessSession, Future<String>>) ignored -> {
       throw new IllegalStateException("sync");
     }).onComplete(outcome::set);
 
@@ -139,6 +140,9 @@ class RepositoryTransactionTest {
       (proxy, method, args) -> {
         switch (method.getName()) {
           case "beginTransaction" -> {
+            return transaction;
+          }
+          case "getTransaction" -> {
             return transaction;
           }
           case "close" -> {

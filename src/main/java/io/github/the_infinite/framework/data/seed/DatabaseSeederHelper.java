@@ -46,7 +46,7 @@ public final class DatabaseSeederHelper {
       }
 
       return repository().getMany(null, new RepositoryOptions<SeederEntry>().setLimit(3000), null)
-        .compose(entries -> repository().stateless().transaction(transaction -> execute(
+        .compose(entries -> repository().stateless().transaction(new RepositoryOptions<>(), transaction -> execute(
           transaction,
           orderedSeeders,
           entries.stream().map(SeederEntry::getSeederName)
@@ -64,7 +64,7 @@ public final class DatabaseSeederHelper {
       }
 
       return repository().getMany(null, new RepositoryOptions<SeederEntry>().setLimit(3000), null)
-        .compose(entries -> repository().stateless().transaction(transaction -> execute(
+        .compose(entries -> repository().stateless().transaction(new RepositoryOptions<>(), transaction -> execute(
           transaction,
           orderedSeeders,
           entries.stream().map(SeederEntry::getSeederName)
@@ -147,6 +147,6 @@ public final class DatabaseSeederHelper {
     }
 
     final var query = repository().startDelete();
-    return repository().deleteOne(query.where(query.builder().equal(query.get("seederName"), seederName)));
+    return repository().deleteOne(query.where(query.builder().equal(query.get("seederName"), seederName)), new RepositoryOptions<>());
   }
 }

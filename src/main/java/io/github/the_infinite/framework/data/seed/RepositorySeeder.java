@@ -45,7 +45,7 @@ public abstract class RepositorySeeder<TModel extends BaseEntity, TModule extend
     return repository.deleteMany(null, options());
   }
 
-  protected <T> Future<T> transaction(@NotNull Function<Session, Future<T>> future) {
-    return repository.transaction(future);
+  protected <T> Future<T> transaction(@NotNull RepositoryOptions<TModel> options, @NotNull Function<Session, Future<T>> future) {
+    return repository.transaction(options, future);
   }
 }

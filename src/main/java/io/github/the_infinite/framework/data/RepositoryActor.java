@@ -177,25 +177,26 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
    * around the task promise.
    *
    * @param transaction The transaction session we are probably calling this for.
+   * @param options     The repository options for this operation.
    * @return The transaction session if it exists, or a session built around task promise that would be disposed when
    * it completes.
    */
-  abstract protected <T> Future<T> getOrCreateSession(@Nullable TSession transaction, SessionBoundHandler<TSession, T> handler);
+  abstract protected <T> Future<T> getOrCreateSession(@Nullable TSession transaction, @Nullable RepositoryOptions<TModel> options, SessionBoundHandler<TSession, T> handler);
 
-  abstract public <ReturnType> Future<ReturnType> transaction(Function<TSession, Future<ReturnType>> future);
+  abstract public <ReturnType> Future<ReturnType> transaction(@NotNull RepositoryOptions<TModel> options, Function<TSession, Future<ReturnType>> future);
 
   // Region for get methods.
-  abstract public Future<Long> getCount(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable TSession transaction);
+  abstract public Future<Long> getCount(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
-  abstract public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable TSession transaction);
+  abstract public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
-  abstract public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable TSession transaction);
+  abstract public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
-  abstract public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable TSession transaction);
+  abstract public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
-  abstract public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable TSession transaction);
+  abstract public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
-  abstract public Future<Optional<TModel>> getById(long id, LockModeType lockMode, @Nullable TSession transaction);
+  abstract public Future<Optional<TModel>> getById(long id, LockModeType lockMode, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
   // End region for get methods.
 
 
@@ -207,6 +208,14 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   // End region for create methods.
 
 
+  // Region for upsert methods.
+  abstract public Future<List<TModel>> upsertMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
+
+  abstract public Future<Optional<TModel>> upsertOne(@NotNull TModel item,
+                                                     @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
+  // End region for upsert methods.
+
+
   // Region for update methods.
   abstract public Future<ChangeResultModel<TModel>> updateMany(@Nullable QueryData<TModel> filter, @NotNull ChangeEffectorFunction<TModel, TSession> valueChanger, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
@@ -216,12 +225,12 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   // End region for update methods.
 
   // Region for delete methods.
-  abstract public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options, @Nullable TSession transaction);
+  abstract public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
   abstract public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter,
-                                            @Nullable RepositoryOptions<TModel> options, @Nullable TSession transaction);
+                                            @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
-  abstract public Future<Optional<TModel>> deleteById(long id, @Nullable TSession transaction);
+  abstract public Future<Optional<TModel>> deleteById(long id, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
   // End region for delete methods.
 
   // Region for utility overloads.
@@ -229,100 +238,43 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   /**
    * @see #getPaginatedView(QueryData, RepositoryOptions, TSession)
    */
-  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
+  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
     return this.getPaginatedView(filter, options, null);
   }
 
   /**
-   * @see #getPaginatedView(QueryData, RepositoryOptions, TSession)
-   */
-  public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter) {
-    return this.getPaginatedView(filter, null);
-  }
-
-  /**
-   * @see #getPaginatedView(QueryData, RepositoryOptions, TSession)
-   */
-  public Future<PaginatedResult<TModel>> getPaginatedView() {
-    return this.getPaginatedView(null);
-  }
-
-  /**
    * @see #getMany(QueryData, RepositoryOptions, TSession)
    */
-  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
+  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
     return this.getMany(filter, options, null);
   }
 
   /**
-   * @see #getMany(QueryData, RepositoryOptions, TSession)
-   */
-  public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter) {
-    return this.getMany(filter, null);
-  }
-
-  /**
-   * @see #getMany(QueryData, RepositoryOptions, TSession)
-   */
-  public Future<List<TModel>> getMany() {
-    return this.getMany(null);
-  }
-
-  /**
    * @see #getDistinctRows(QueryData, RepositoryOptions, TSession)
    */
-  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
+  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
     return this.getDistinctRows(filter, options, null);
   }
 
   /**
-   * @see #getDistinctRows(QueryData, RepositoryOptions, TSession)
-   */
-  public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter) {
-    return this.getDistinctRows(filter, null);
-  }
-
-  /**
-   * @see #getDistinctRows(QueryData, RepositoryOptions, TSession)
-   */
-  public Future<List<TModel>> getDistinctRows() {
-    return this.getDistinctRows(null);
-  }
-
-
-  /**
    * @see #getOne(QueryData, RepositoryOptions, TSession)
    */
-  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @Nullable RepositoryOptions<TModel> options) {
+  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
     return this.getOne(filter, options, null);
   }
 
   /**
-   * @see #getOne(QueryData, RepositoryOptions, TSession)
+   * @see #getById(long, LockModeType, RepositoryOptions, TSession)
    */
-  public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter) {
-    return this.getOne(filter, null);
+  public Future<Optional<TModel>> getById(long id, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction) {
+    return this.getById(id, LockModeType.OPTIMISTIC, options, transaction);
   }
 
   /**
-   * @see #getOne(QueryData, RepositoryOptions, TSession)
+   * @see #getById(long, LockModeType, RepositoryOptions, TSession)
    */
-  public Future<Optional<TModel>> getOne() {
-    return this.getOne(null);
-  }
-
-  /**
-   * @see #getById(long, LockModeType, TSession)
-   */
-  public Future<Optional<TModel>> getById(long id, @Nullable TSession transaction) {
-    return this.getById(id, LockModeType.OPTIMISTIC, transaction);
-  }
-
-  /**
-   * @see #getById(long, LockModeType, TSession)
-   */
-  public Future<Optional<TModel>> getById(long id) {
-    return this.getById(id, null);
+  public Future<Optional<TModel>> getById(long id, @NotNull RepositoryOptions<TModel> options) {
+    return this.getById(id, LockModeType.OPTIMISTIC, options, null);
   }
 
   /**
@@ -361,56 +313,40 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   }
 
   /**
+   * @see #upsertMany(List, RepositoryOptions, TSession)
+   */
+  public Future<List<TModel>> upsertMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options) {
+    return this.upsertMany(items, options, null);
+  }
+
+  /**
+   * @see #upsertOne(BaseEntity, RepositoryOptions, TSession)
+   */
+  public Future<Optional<TModel>> upsertOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options) {
+    return this.upsertOne(item, options, null);
+  }
+
+  /**
    * @see #deleteMany(DeleteQueryData, RepositoryOptions, TSession)
    */
   public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter,
-                                    @Nullable RepositoryOptions<TModel> options) {
+                                    @NotNull RepositoryOptions<TModel> options) {
     return this.deleteMany(filter, options, null);
   }
-
-  /**
-   * @see #deleteMany(DeleteQueryData, RepositoryOptions, TSession)
-   */
-  public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter) {
-    return this.deleteMany(filter, null);
-  }
-
-  /**
-   * @see #deleteMany(DeleteQueryData, RepositoryOptions, TSession)
-   */
-  public Future<Integer> deleteMany() {
-    return this.deleteMany(null);
-  }
-
 
   /**
    * @see #deleteOne(DeleteQueryData, RepositoryOptions, TSession)
    */
   public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter,
-                                   @Nullable RepositoryOptions<TModel> options) {
+                                   @NotNull RepositoryOptions<TModel> options) {
     return this.deleteOne(filter, options, null);
   }
 
   /**
-   * @see #deleteOne(DeleteQueryData, RepositoryOptions, TSession)
+   * @see #deleteById(long, RepositoryOptions, TSession)
    */
-  public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter) {
-    return this.deleteOne(filter, null);
-  }
-
-  /**
-   * @see #deleteOne(DeleteQueryData, RepositoryOptions, TSession)
-   */
-  public Future<Boolean> deleteOne() {
-    return this.deleteOne(null);
-  }
-
-
-  /**
-   * @see #deleteById(long, TSession)
-   */
-  public Future<Optional<TModel>> deleteById(long id) {
-    return this.deleteById(id, null);
+  public Future<Optional<TModel>> deleteById(long id, @NotNull RepositoryOptions<TModel> options) {
+    return this.deleteById(id, options, null);
   }
 
   public interface SessionBoundHandler<TSession, T> {

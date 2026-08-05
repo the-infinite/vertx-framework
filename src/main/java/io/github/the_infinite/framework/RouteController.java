@@ -88,8 +88,8 @@ public abstract class RouteController {
   static Handler<RoutingContext> wrapMiddleware(Handler<CorrelationContext> middleware) {
     final var env = AppEnvironment.getInstance();
     return routingContext -> {
+      final var correlationContext = CorrelationContext.from(routingContext);
       try {
-        final var correlationContext = CorrelationContext.from(routingContext);
         middleware.handle(correlationContext);
       } catch (Exception e) {
         final var errorResult = ErrorResult.of(e);
@@ -97,7 +97,7 @@ public abstract class RouteController {
         if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
           errorResult.printStackTrace();
         }
-        endAs(errorResult.toServiceResult(), CorrelationContext.from(routingContext));
+        endAs(errorResult.toServiceResult(), correlationContext);
       }
     };
   }
@@ -126,6 +126,7 @@ public abstract class RouteController {
 
     //? If this has been sent or is no longer needed...
     if (response.headWritten() || response.ended()) {
+      context.cleanup();
       return;
     }
 
@@ -139,6 +140,7 @@ public abstract class RouteController {
     if (resultBody == null) {
       final var error = new IllegalStateException("Response body is null");
       response.putHeader("Content-Type", "text/plain").setStatusCode(503).end(ErrorResult.of(error).toServiceResult().getMessage());
+      context.cleanup();
       throw error;
     }
 
@@ -146,36 +148,42 @@ public abstract class RouteController {
     if (result.getResponseType() == TypedServiceResult.ResponseType.JSON) {
       response.putHeader("Content-Type", "application/json");
       response.end(resultBody);
+      context.cleanup();
       return;
     }
 
     if (result.getResponseType() == TypedServiceResult.ResponseType.FILE) {
       response.putHeader("Content-Disposition", "attachment; filename=\"%s\"".formatted(resultBody.substring(resultBody.lastIndexOf("/") + 1)));
       response.sendFile(resultBody);
+      context.cleanup();
       return;
     }
 
     if (result.getResponseType() == TypedServiceResult.ResponseType.XML) {
       response.putHeader("Content-Type", "application/xml");
       response.end(resultBody);
+      context.cleanup();
       return;
     }
 
     if (result.getResponseType() == TypedServiceResult.ResponseType.JAVASCRIPT) {
       response.putHeader("Content-Type", "application/javascript");
       response.end(resultBody);
+      context.cleanup();
       return;
     }
 
     if (result.getResponseType() == TypedServiceResult.ResponseType.HTML) {
       response.putHeader("Content-Type", "text/html");
       response.end(resultBody);
+      context.cleanup();
       return;
     }
 
     //? Default to plain text.
     response.putHeader("Content-Type", "text/plain");
     response.end(resultBody);
+    context.cleanup();
   }
 
   static private <T> Handler<RoutingContext> wrapHandler(RouteHandler<T> handler) {
