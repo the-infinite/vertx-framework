@@ -25,6 +25,7 @@ import jakarta.persistence.LockModeType;
 
 @SuppressWarnings("unused")
 public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession> permits StatefulRepositoryActor, StatelessRepositoryActor {
+  private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(RepositoryActor.class);
   protected final SessionFactory sessionFactory;
   protected final Class<TModel> modelType;
 
@@ -43,10 +44,17 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   static <T> Future<T> wrap(Supplier<T> supplier, @Nullable Context context) {
     final var promise = Promise.<T>promise();
     final Runnable execute = () -> {
+      T result;
       try {
-        promise.succeed(supplier.get());
+        result = supplier.get();
       } catch (Throwable cause) {
         promise.fail(cause);
+        return;
+      }
+      try {
+        promise.succeed(result);
+      } catch (Throwable listenerFailure) {
+        logger.error("Downstream listener failed after promise completed", listenerFailure);
       }
     };
 

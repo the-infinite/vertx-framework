@@ -161,7 +161,9 @@ public final class CorrelationContext {
     }
 
     final var foundSession = session.get();
-    foundSession.flush();
+    try {
+      foundSession.flush();
+    } catch (Exception ignored) { }
     foundSession.close();
     session.set(null);
   }

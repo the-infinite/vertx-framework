@@ -197,14 +197,25 @@ public abstract class RouteController {
 
         //? Attach the listener of sorts...
         future.andThen(typedResult -> {
-          //? If this failed...
-          if (!typedResult.succeeded()) {
-            endAs(ErrorResult.of(typedResult.cause()).toServiceResult(), correlationContext);
-            return;
-          }
+          try {
+            //? If this failed...
+            if (!typedResult.succeeded()) {
+              endAs(ErrorResult.of(typedResult.cause()).toServiceResult(), correlationContext);
+              return;
+            }
 
-          //? Get the result down.
-          endAs(typedResult.result(), correlationContext);
+            //? Get the result down.
+            endAs(typedResult.result(), correlationContext);
+          } catch (Exception e) {
+            try {
+              endAs(ErrorResult.of(e).toServiceResult(), correlationContext);
+            } catch (Exception ignored) {
+              ConsoleLogger.getInstance().error("Failed to send error response: " + e.getMessage());
+              if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
+                e.printStackTrace();
+              }
+            }
+          }
         });
 
         //? Then call the handler so the attached listener can propagate as required.
