@@ -6,6 +6,8 @@ import org.hibernate.Hibernate;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
+import org.hibernate.engine.FetchTiming;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -42,10 +44,30 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
 
   private void prepareDetached(Session session, RepositoryOptions<TModel> options, TModel entity) {
     Hibernate.initialize(entity);
+    this.initializeLazyState(entity);
     final var detach = options != null && options.isDetach();
     if (!session.getTransaction().isActive() || detach) {
       session.detach(entity);
     }
+  }
+
+  /**
+   * Force-loads any lazy (DELAYED) persistent attribute of the entity while still inside the
+   * worker-thread session boundary. This guarantees that downstream code and JSON serialization
+   * never trigger a blocking JDBC query on the Vert.x event loop, which previously froze the app.
+   */
+  private void initializeLazyState(TModel entity) {
+    final var persister = this.sessionFactory.unwrap(SessionFactoryImplementor.class)
+      .getMappingMetamodel()
+      .getEntityDescriptor(entity.getClass());
+    persister.forEachAttributeMapping(attribute -> {
+      if (attribute.getMappedFetchOptions().getTiming() == FetchTiming.DELAYED) {
+        final var value = attribute.getValue(entity);
+        if (value != null) {
+          Hibernate.initialize(value);
+        }
+      }
+    });
   }
 
   @Override

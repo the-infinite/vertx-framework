@@ -226,8 +226,9 @@ public final class DatabaseFactory {
         props.put("jakarta.persistence.jdbc.password", options.password);
         props.put("hibernate.connection.password", options.password);
       }
-
-      props.put("hibernate.connection.pool_size", options.poolSize);
+      props.put("hibernate.connection.provider_class", HikariConnectionProvider.class.getName());
+      props.put("hibernate.hikari.maximumPoolSize", options.poolSize);
+      props.put("hibernate.hikari.connectionTimeout", 5_000L);
       props.put("jakarta.persistence.schema-generation.database.action", options.schemaGenerateAction);
       props.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
       props.put("jakarta.persistence.validation.factory", ValidationHelper.getInstance().factory());

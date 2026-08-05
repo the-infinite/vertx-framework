@@ -12,6 +12,7 @@ import java.util.Map;
 
 import io.github.the_infinite.framework.env.AppEnvironment;
 import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
 
 public class RedisRegionFactory extends RegionFactoryTemplate {
   // Global pool shared across all cache regions
@@ -20,7 +21,14 @@ public class RedisRegionFactory extends RegionFactoryTemplate {
   @Override
   protected void prepareForUse(SessionFactoryOptions settings, Map configValues) {
     if (globalJedisPool == null) {
-      globalJedisPool = new JedisPool(AppEnvironment.getInstance().getRedisUrl());
+      final var poolConfig = new JedisPoolConfig();
+      poolConfig.setMaxTotal(8);
+      poolConfig.setMaxIdle(8);
+      poolConfig.setMinIdle(0);
+      poolConfig.setMaxWaitMillis(5_000);
+      poolConfig.setTestOnBorrow(true);
+      poolConfig.setTestOnReturn(false);
+      globalJedisPool = new JedisPool(poolConfig, AppEnvironment.getInstance().getRedisUrl());
     }
   }
 
