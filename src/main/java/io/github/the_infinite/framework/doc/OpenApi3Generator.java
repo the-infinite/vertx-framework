@@ -91,20 +91,6 @@ public final class OpenApi3Generator {
       ? registrant.getGlobalRateLimit() + " requests per minute"
       : "Unlimited"));
 
-    if (!registrant.getUnauthenticatedGlobalHeaders().isEmpty()) {
-      lines.add("");
-      lines.add("Global headers applied to unprotected endpoints:");
-      registrant.getUnauthenticatedGlobalHeaders().forEach((key, value) ->
-        lines.add(String.format("- `%s`: `%s`", key, value)));
-    }
-
-    if (!registrant.getAuthenticatedGlobalHeaders().isEmpty()) {
-      lines.add("");
-      lines.add("Global headers applied to protected endpoints:");
-      registrant.getAuthenticatedGlobalHeaders().forEach((key, value) ->
-        lines.add(String.format("- `%s`: `%s`", key, value)));
-    }
-
     if (!registrant.getAuthSettings().isEmpty()) {
       lines.add("");
       lines.add("Authentication settings:");
@@ -140,7 +126,7 @@ public final class OpenApi3Generator {
     return paths;
   }
 
-private static JsonObject buildOperation(RouteDescription description, String routePath, boolean registersWithAuthentication) {
+  private static JsonObject buildOperation(RouteDescription description, String routePath, boolean registersWithAuthentication) {
     final var operation = new JsonObject()
       .put("summary", nonNull(description.name()))
       .put("operationId", operationId(description.name(), routePath));
@@ -219,7 +205,7 @@ private static JsonObject buildOperation(RouteDescription description, String ro
         .put("description", nonNull(value))
         .put("schema", new JsonObject()
           .put("type", "string")
-          .put("default", value)));
+          .put("default", "")));
     });
 
     return parameters;
@@ -237,7 +223,10 @@ private static JsonObject buildOperation(RouteDescription description, String ro
       final var properties = new JsonObject();
       properties.put("body", new JsonObject()
         .put("type", "string")
-        .put("description", "JSON-encoded application payload sent alongside the uploaded files, if any."));
+        .put(
+          "description",
+          "JSON-encoded application payload sent alongside the uploaded files, if any. " +
+            "Switch to the application/json to see the type information"));
       fileParameters.forEach((name, parameter) -> {
         final var schema = new JsonObject()
           .put("type", "string")
@@ -249,13 +238,20 @@ private static JsonObject buildOperation(RouteDescription description, String ro
         properties.put(name, schema);
       });
 
+      final var content = new JsonObject();
+      content.put("multipart/form-data", new JsonObject()
+        .put("schema", new JsonObject()
+          .put("type", "object")
+          .put("properties", properties)));
+
+      final var dtoClass = description.requestBodyClass();
+      if (dtoClass != null && dtoClass != Void.class) {
+        content.put("application/json", new JsonObject()
+          .put("schema", schemaForClass(dtoClass)));
+      }
       return new JsonObject()
         .put("required", true)
-        .put("content", new JsonObject()
-          .put("multipart/form-data", new JsonObject()
-            .put("schema", new JsonObject()
-              .put("type", "object")
-              .put("properties", properties))));
+        .put("content", content);
     }
 
     final var dtoClass = description.requestBodyClass();
@@ -354,7 +350,7 @@ private static JsonObject buildOperation(RouteDescription description, String ro
   }
 
   private static List<Object> collectExamples(Class<?> dtoClass) {
-    final var examples = new ArrayList<Object>();
+    final var examples = new ArrayList<>();
     if (dtoClass == null) {
       return examples;
     }
@@ -715,7 +711,7 @@ private static JsonObject buildOperation(RouteDescription description, String ro
   }
 
   private static JsonObject scalarSchema(Class<?> clazz) {
-    if (clazz == String.class || clazz == Character.class || clazz == char.class) {
+    if (clazz == String.class || clazz == Character.class || clazz == char.class || clazz == CharSequence.class) {
       return new JsonObject().put("type", "string");
     }
     if (clazz == UUID.class) {
