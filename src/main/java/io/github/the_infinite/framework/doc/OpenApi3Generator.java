@@ -325,7 +325,7 @@ public final class OpenApi3Generator {
       return new JsonObject()
         .put("type", "object")
         .put("properties", new JsonObject()
-          .put("status", new JsonObject().put("type", "string"))
+          .put("status", new JsonObject().put("type", "string").put("enum", new JsonArray().add("success").add("error")))
           .put("message", new JsonObject().put("type", "string"))
           .put("data", schemaForClass(dataClass)));
     }
@@ -345,6 +345,17 @@ public final class OpenApi3Generator {
     }
     if (clazz.getSimpleName().isBlank() || clazz.getSimpleName().startsWith("MissingExample")) {
       return null;
+    }
+
+    final var dtoClass = dto.getClass();
+    try {
+      for (Field field : dtoClass.getDeclaredFields()) {
+        if (field.isAnnotationPresent(ResponseExample.class)) {
+          return field.getType();
+        }
+      }
+    } catch (NoClassDefFoundError | SecurityException e) {
+      // Fallback if field reflection fails
     }
     return clazz;
   }
@@ -578,9 +589,10 @@ public final class OpenApi3Generator {
     }
 
     if (Collection.class.isAssignableFrom(clazz)) {
+      final var itemType = clazz.getTypeParameters()[0].getBounds()[0];
       return new JsonObject()
         .put("type", "array")
-        .put("items", new JsonObject());
+        .put("items", schemaForType(itemType, resolving));
     }
 
     if (Map.class.isAssignableFrom(clazz) || JsonObject.class.isAssignableFrom(clazz)) {
