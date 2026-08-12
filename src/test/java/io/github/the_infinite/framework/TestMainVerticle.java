@@ -76,7 +76,32 @@ public class TestMainVerticle {
       .onComplete(testContext
         .succeeding(body -> testContext.verify(() -> {
             assert body.toString().contains("<!DOCTYPE html>");
-            assert body.toString().contains("API Documentation");
+            assert body.toString().contains("swagger-ui");
+            testContext.completeNow();
+          })
+        )
+      );
+  }
+
+  @Test
+  void openapi_spec_served(Vertx vertx, @NotNull VertxTestContext testContext) {
+    final var env = AppEnvironment.getInstance();
+    final var client = vertx.createHttpClient(new PoolOptions());
+
+    //? Send the request then.
+    client.request(HttpMethod.GET, env.getServerPort(), "localhost", "/docs")
+      .compose(req -> req.send().onComplete(ar -> {
+        if (ar.succeeded()) {
+            var response = ar.result();
+            assert response.headers().get("Content-Type").contains("application/json");
+        }
+      }).compose(HttpClientResponse::body))
+      .onComplete(testContext
+        .succeeding(body -> testContext.verify(() -> {
+            final var spec = new io.vertx.core.json.JsonObject(body.toString());
+            assert "3.1.0".equals(spec.getString("openapi"));
+            assert spec.getJsonObject("paths") != null;
+            assert spec.getJsonObject("paths").containsKey("/greet/{name}");
             testContext.completeNow();
           })
         )
