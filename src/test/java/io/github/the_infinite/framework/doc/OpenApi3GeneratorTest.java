@@ -82,6 +82,13 @@ class OpenApi3GeneratorTest {
     @Override public String toExample() { return "{}"; }
   }
 
+  static class RecursiveBox<T> { private T value; private List<RecursiveBox<T>> children; }
+  static class RecursiveBoxPayload implements DocumentableDTO {
+    private RecursiveBox<Payload> box;
+    private java.util.Map<String, List<Payload>> grouped;
+    @Override public String toExample() { return "{}"; }
+  }
+
   static class ResponseExamplePayload implements DocumentableDTO {
     @Override public String toExample() { return "{}"; }
   }
@@ -176,6 +183,8 @@ class OpenApi3GeneratorTest {
       .group("component-test").name("inherited-generic-test").requestBodyClass(GenericChild.class).build());
     registrant.registerRoute("/__openapi_collection_subclass_test", "POST", "CollectionSubclassTestController", RouteDescription.builder()
       .group("component-test").name("collection-subclass-test").requestBodyClass(CollectionSubclassPayload.class).build());
+    registrant.registerRoute("/__openapi_recursive_generic_test", "POST", "RecursiveGenericTestController", RouteDescription.builder()
+      .group("component-test").name("recursive-generic-test").requestBodyClass(RecursiveBoxPayload.class).build());
 
     final var schemas = OpenApi3Generator.generate(registrant).getJsonObject("components").getJsonObject("schemas");
     final var envelopeName = schemas.fieldNames().stream().filter(name -> name.contains("EnvelopeOf") && name.contains("Payload_"))
@@ -186,6 +195,8 @@ class OpenApi3GeneratorTest {
     assertNotNull(envelope);
     assertEquals("#/components/schemas/" + payloadName,
       envelope.getJsonObject("properties").getJsonObject("data").getString("$ref"));
+    assertCollectionItemsReferencePayload(schemas, payloadName,
+      envelope.getJsonObject("properties").getJsonObject("entries"));
     assertCollectionItemsReferencePayload(schemas, payloadName, schemas.getJsonObject(genericPayloadName)
       .getJsonObject("properties").getJsonObject("listPayloads"));
     assertCollectionItemsReferencePayload(schemas, payloadName, schemas.getJsonObject(genericPayloadName)
@@ -198,6 +209,14 @@ class OpenApi3GeneratorTest {
     assertCollectionItemsReferencePayload(schemas, payloadName, collectionSubclass.getJsonObject("directItems"));
     final var nestedCollection = schemas.getJsonObject(referenceName(collectionSubclass.getJsonObject("nestedItems")));
     assertCollectionItemsReferencePayload(schemas, payloadName, nestedCollection.getJsonObject("items"));
+    final var recursivePayload = schemas.getJsonObject(schemaKey(schemas, RecursiveBoxPayload.class)).getJsonObject("properties");
+    final var recursiveBox = schemas.getJsonObject(referenceName(recursivePayload.getJsonObject("box")));
+    assertEquals("#/components/schemas/" + payloadName, recursiveBox.getJsonObject("properties")
+      .getJsonObject("value").getString("$ref"));
+    assertEquals(referenceName(recursivePayload.getJsonObject("box")), referenceName(recursiveBox.getJsonObject("properties")
+      .getJsonObject("children").getJsonObject("items")));
+    assertCollectionItemsReferencePayload(schemas, payloadName, recursivePayload.getJsonObject("grouped")
+      .getJsonObject("additionalProperties"));
 
     final var parentName = schemaKey(schemas, ResponseExampleParent.class);
     final var responses = OpenApi3Generator.generate(registrant).getJsonObject("components").getJsonObject("responses");

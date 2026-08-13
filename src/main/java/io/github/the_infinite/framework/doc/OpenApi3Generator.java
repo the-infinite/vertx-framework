@@ -14,6 +14,7 @@ import java.util.*;
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Produces a valid <a href="https://spec.openapis.org/oas/v3.1.0.html">OpenAPI 3.1</a>
@@ -25,6 +26,7 @@ import io.vertx.core.json.JsonObject;
  * <code>example</code> rich payloads over hand-built schema models.</p>
  */
 @SuppressWarnings("unused")
+@Slf4j
 public final class OpenApi3Generator {
   private static final String OPENAPI_VERSION = "3.1.0";
   private static final String DOCUMENTATION_CONTROLLER = "DocumentationController";
@@ -55,7 +57,7 @@ public final class OpenApi3Generator {
         Arrays.stream(parameterizedType.getActualTypeArguments())
           .map(OpenApi3Generator::displayName)
           .collect(java.util.stream.Collectors.joining("And"));
-      return shortTypeName(parameterizedType.getTypeName(), display);
+      return shortTypeName(typeIdentity(parameterizedType), display);
     }
     if (type instanceof GenericArrayType arrayType)
       return componentName(arrayType.getGenericComponentType()) + "__array";
@@ -87,6 +89,26 @@ public final class OpenApi3Generator {
     // OpenAPI has no schema alias that Swagger UI uses consistently. A short,
     // stable suffix retains the fully qualified identity without exposing it.
     return display.replaceAll("[^A-Za-z0-9_.]", "_") + "_" + Integer.toUnsignedString(identity.hashCode(), 36);
+  }
+
+  /** A stable identity shared by reflection and our substituted Type instances. */
+  private static String typeIdentity(Type type) {
+    if (type instanceof Class<?> clazz) return clazz.getName();
+    if (type instanceof ParameterizedType parameterizedType) {
+      return typeIdentity(parameterizedType.getRawType()) + "<" +
+        Arrays.stream(parameterizedType.getActualTypeArguments())
+          .map(OpenApi3Generator::typeIdentity)
+          .collect(java.util.stream.Collectors.joining(",")) + ">";
+    }
+    if (type instanceof GenericArrayType arrayType) return typeIdentity(arrayType.getGenericComponentType()) + "[]";
+    if (type instanceof TypeVariable<?> variable) {
+      return variable.getGenericDeclaration().toString() + ":" + variable.getName();
+    }
+    if (type instanceof WildcardType wildcard) {
+      return "?extends" + Arrays.stream(wildcard.getUpperBounds())
+        .map(OpenApi3Generator::typeIdentity).collect(java.util.stream.Collectors.joining("&"));
+    }
+    return type.getTypeName();
   }
 
   /**
@@ -726,7 +748,9 @@ public final class OpenApi3Generator {
       INLINE_COMPONENT_DEFINITIONS.set(inline);
       inline.add(clazz);
       try {
-        componentSchemas.put(name, schemaForType(clazz, new HashSet<>(), typeBindings(type)));
+        // Keep the parameterized type here. Replacing it with clazz discards
+        // Foo<Bar>'s binding before Foo's fields (for example, List<T>) are read.
+        componentSchemas.put(name, schemaForType(type, new HashSet<>(), typeBindings(type)));
       } finally {
         inline.remove(clazz);
         if (inline.isEmpty()) INLINE_COMPONENT_DEFINITIONS.remove();
@@ -771,9 +795,16 @@ public final class OpenApi3Generator {
           return arguments.length == 0 ? new JsonObject() : schemaForType(arguments[0], resolving, bindings);
         }
         if (ACTIVE_COMPONENTS.get() != null && isStructuredType(rawClass)) {
+          if (Optional.ofNullable(INLINE_COMPONENT_DEFINITIONS.get()).orElseGet(Set::of).contains(rawClass)) {
+            // We are materializing this parameterized component. Continue with
+            // the raw class only after retaining its actual type bindings.
+            // We are materializing this parameterized component. Continue with
+            // the raw class only after retaining its actual type bindings.
+            return schemaForType(rawClass, resolving, typeBindings(parameterizedType));
+          }
           return schemaReferenceForType(parameterizedType);
         }
-        return schemaForClass(rawClass, resolving);
+        return schemaForType(rawClass, resolving, typeBindings(parameterizedType));
       }
     }
     if (type instanceof GenericArrayType arrayType) {
@@ -781,15 +812,23 @@ public final class OpenApi3Generator {
         .put("items", schemaForType(arrayType.getGenericComponentType(), resolving, bindings));
     }
     if (type instanceof WildcardType wildcard) {
-      final var bounds = wildcard.getUpperBounds();
-      return bounds.length == 0 ? new JsonObject() : schemaForType(bounds[0], resolving, bindings);
+      final var lowerBounds = wildcard.getLowerBounds();
+      if (lowerBounds.length > 0) return schemaForType(lowerBounds[0], resolving, bindings);
+      final var upperBounds = wildcard.getUpperBounds();
+      return upperBounds.length == 0 || upperBounds[0] == Object.class
+        ? new JsonObject()
+        : schemaForType(upperBounds[0], resolving, bindings);
     }
     if (type instanceof TypeVariable<?> variable) {
       final var bound = bindings.get(variable);
       return bound == null ? new JsonObject() : schemaForType(bound, resolving, bindings);
     }
-    if (!(type instanceof Class<?> clazz)) return new JsonObject();
+    if (!(type instanceof Class<?> clazz)) {
+      log.info("Non class-type {}", type.getTypeName());
+      return new JsonObject();
+    }
     if (clazz == Object.class) {
+      log.info("Object class found, returning empty schema for {}", clazz.getName());
       return new JsonObject();
     }
 
@@ -814,6 +853,7 @@ public final class OpenApi3Generator {
     }
 
     if (Collection.class.isAssignableFrom(clazz)) {
+      log.info("Collection class found, initializing schema for {}", clazz.getName());
       return new JsonObject()
         .put("type", "array")
         .put("items", schemaForType(collectionElementType(clazz, bindings), resolving, bindings));
@@ -837,7 +877,11 @@ public final class OpenApi3Generator {
 
     // Cycle guard: nested beans that reference each other must not recurse forever.
     if (!resolving.add(clazz)) {
-      return ACTIVE_COMPONENTS.get() != null ? schemaReferenceForClass(clazz) : new JsonObject();
+      // The current binding context may describe Node<Payload>, not merely Node.
+      // Preserve it in the cycle reference so its fields retain Payload.
+      return ACTIVE_COMPONENTS.get() != null
+        ? schemaReferenceForType(boundType(clazz, bindings))
+        : new JsonObject();
     }
 
     try {
@@ -850,7 +894,8 @@ public final class OpenApi3Generator {
           if (Modifier.isStatic(field.getModifiers()) || field.isSynthetic()) {
             continue;
           }
-          properties.put(propertyName(field), schemaForType(field.getGenericType(), resolving, currentBindings));
+          properties.put(propertyName(field), schemaForType(field.getGenericType(), resolving,
+            currentBindings));
           if (field.isAnnotationPresent(NotNull.class) || field.isAnnotationPresent(jakarta.validation.constraints.NotNull.class)) {
             required.add(propertyName(field));
           }
@@ -955,6 +1000,19 @@ public final class OpenApi3Generator {
       return new ResolvedParameterizedType((Class<?>) parameterizedType.getRawType(), arguments, parameterizedType.getOwnerType());
     }
     return type;
+  }
+
+  private static Type boundType(Class<?> clazz, Map<TypeVariable<?>, Type> bindings) {
+    final var variables = clazz.getTypeParameters();
+    if (variables.length == 0) return clazz;
+
+    final var arguments = Arrays.stream(variables)
+      .map(variable -> resolveType(variable, bindings))
+      .toArray(Type[]::new);
+    // A raw generic class does not have enough information to claim a concrete
+    // parameterized component identity.
+    if (Arrays.equals(variables, arguments)) return clazz;
+    return new ResolvedParameterizedType(clazz, arguments, clazz.getDeclaringClass());
   }
 
   private static HashMap<TypeVariable<?>, Type> inheritedTypeBindings(Type superclass,
