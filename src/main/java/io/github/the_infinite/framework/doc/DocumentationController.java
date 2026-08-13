@@ -2,6 +2,7 @@ package io.github.the_infinite.framework.doc;
 
 import org.jetbrains.annotations.NotNull;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -28,7 +29,7 @@ public class DocumentationController extends RouteController {
   private static final String DOCS_PATH = "/docs";
   private static final String SWAGGER_UI_WEB_ROOTS = "doc";
 
-  private JsonObject cachedOpenApiSpec = null;
+  private static String cachedOpenApiSpec = null;
 
   public DocumentationController(@NotNull Vertx vertx) {
     super(vertx, "/");
@@ -36,6 +37,14 @@ public class DocumentationController extends RouteController {
 
   @Override
   public void registerRoutes() {
+    //? Okay then.
+    final var docRegistrant = DocumentationRegistrant.getInstance();
+
+    //? No swagger docs in production, please.
+    if (docRegistrant.getDocumentationMode() != DocumentationRegistrant.DocumentationMode.EXTERNAL && isProductionEnvironment()) {
+      return;
+    }
+
     //? Read the request bodies for the reserved testing endpoints.
     registrant.getRouter().route().order(-1).handler(BodyHandler.create());
 
@@ -57,7 +66,7 @@ public class DocumentationController extends RouteController {
       .handler(context -> context.response()
         .putHeader("Content-Type", "application/json")
         .setStatusCode(200)
-        .end(resolveOpenApiSpec().encodePrettily()));
+        .end(resolveOpenApiSpec()));
 
     //? Serve the Swagger UI static assets from the `doc` directory on the classpath.
     registrant.getRouter().route()
@@ -65,11 +74,16 @@ public class DocumentationController extends RouteController {
       .blockingHandler(StaticHandler.create(SWAGGER_UI_WEB_ROOTS));
   }
 
-  private JsonObject resolveOpenApiSpec() {
+  private static String resolveOpenApiSpec() {
     if (cachedOpenApiSpec == null) {
-      cachedOpenApiSpec = OpenApi3Generator.generate(DocumentationRegistrant.getInstance());
+      final var registrant = DocumentationRegistrant.getInstance();
+      cachedOpenApiSpec = OpenApi3Generator.generate(registrant).encode();
     }
     return cachedOpenApiSpec;
+  }
+
+  public static void buildSpecs() {
+    resolveOpenApiSpec();
   }
 
   private void handleTestRequest(io.vertx.ext.web.RoutingContext context, String clientName) {
@@ -77,7 +91,7 @@ public class DocumentationController extends RouteController {
       String method = context.request().method().name();
       String url = context.request().absoluteURI();
 
-      Map<String, String> headers = new java.util.HashMap<>();
+      Map<String, String> headers = new HashMap<>();
       context.request().headers().forEach(entry -> {
         String key = entry.getKey();
         if (!key.equalsIgnoreCase("X-TM30-Test-Client") &&
@@ -90,7 +104,7 @@ public class DocumentationController extends RouteController {
 
       String paramsJsonStr = context.request().getHeader("X-TM30-Test-Params");
       JsonObject paramsJson = paramsJsonStr != null ? new JsonObject(paramsJsonStr) : new JsonObject();
-      Map<String, String> parameters = new java.util.HashMap<>();
+      Map<String, String> parameters = new HashMap<>();
       paramsJson.forEach(entry -> parameters.put(entry.getKey(), String.valueOf(entry.getValue())));
 
       HttpClient selectedClient = null;

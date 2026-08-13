@@ -24,15 +24,69 @@ import io.vertx.core.json.JsonObject;
  * served by the {@link DocumentationController}, so it deliberately favours
  * <code>example</code> rich payloads over hand-built schema models.</p>
  */
+@SuppressWarnings("unused")
 public final class OpenApi3Generator {
   private static final String OPENAPI_VERSION = "3.1.0";
   private static final String DOCUMENTATION_CONTROLLER = "DocumentationController";
   private static final ObjectMapper MAPPER = new ObjectMapper();
+  /** Components are scoped to one generated document; keeping these globally leaks
+   * types between applications and makes concurrent generation unsafe. */
+  private static final ThreadLocal<ComponentRegistry> ACTIVE_COMPONENTS = new ThreadLocal<>();
+  private static final ThreadLocal<Set<Class<?>>> INLINE_COMPONENT_DEFINITIONS = new ThreadLocal<>();
   private static final Set<String> RESERVED_HEADER_PARAMETERS = Set.of(
     "accept", "content-type", "authorization"
   );
 
   private OpenApi3Generator() {
+  }
+
+  private static String componentName(Class<?> clazz) {
+    return shortTypeName(clazz.getName(), displayName(clazz));
+  }
+
+  private static String componentName(Class<?> clazz, Type type) {
+    return componentName(clazz) + "__" + componentName(type);
+  }
+
+  private static String componentName(Type type) {
+    if (type instanceof Class<?> clazz) return componentName(clazz);
+    if (type instanceof ParameterizedType parameterizedType) {
+      final var display = displayName(parameterizedType.getRawType()) + "Of" +
+        Arrays.stream(parameterizedType.getActualTypeArguments())
+          .map(OpenApi3Generator::displayName)
+          .collect(java.util.stream.Collectors.joining("And"));
+      return shortTypeName(parameterizedType.getTypeName(), display);
+    }
+    if (type instanceof GenericArrayType arrayType)
+      return componentName(arrayType.getGenericComponentType()) + "__array";
+    if (type instanceof TypeVariable<?> variable) return "type__" + variable.getName();
+    if (type instanceof WildcardType wildcard) {
+      final var bounds = wildcard.getUpperBounds();
+      return bounds.length == 0 ? "object" : componentName(bounds[0]);
+    }
+    return shortTypeName(type.getTypeName(), "Type");
+  }
+
+  private static String displayName(Type type) {
+    if (type instanceof Class<?> clazz) return displayName(clazz);
+    if (type instanceof ParameterizedType parameterizedType) {
+      return displayName(parameterizedType.getRawType()) + "Of" + Arrays.stream(parameterizedType.getActualTypeArguments())
+        .map(OpenApi3Generator::displayName).collect(java.util.stream.Collectors.joining("And"));
+    }
+    if (type instanceof TypeVariable<?> variable) return variable.getName();
+    return "Value";
+  }
+
+  private static String displayName(Class<?> clazz) {
+    final var chain = new ArrayDeque<String>();
+    for (Class<?> current = clazz; current != null; current = current.getEnclosingClass()) chain.addFirst(current.getSimpleName());
+    return String.join(".", chain);
+  }
+
+  private static String shortTypeName(String identity, String display) {
+    // OpenAPI has no schema alias that Swagger UI uses consistently. A short,
+    // stable suffix retains the fully qualified identity without exposing it.
+    return display.replaceAll("[^A-Za-z0-9_.]", "_") + "_" + Integer.toUnsignedString(identity.hashCode(), 36);
   }
 
   /**
@@ -42,24 +96,30 @@ public final class OpenApi3Generator {
    * @return the OpenAPI specification as a {@link JsonObject}.
    */
   public static JsonObject generate(DocumentationRegistrant registrant) {
-    final var spec = new JsonObject()
-      .put("openapi", OPENAPI_VERSION)
-      .put("info", buildInfo(registrant))
-      .put("servers", buildServers())
-      .put("paths", buildPaths(registrant));
+    ACTIVE_COMPONENTS.set(new ComponentRegistry());
+    try {
+      final var spec = new JsonObject()
+        .put("openapi", OPENAPI_VERSION)
+        .put("info", buildInfo(registrant))
+        .put("servers", buildServers())
+        .put("paths", buildPaths(registrant));
 
-    final var components = resolveComponents(registrant);
-    if (securitySchemeKey(components) != null) {
-      spec.put("components", components);
-      spec.put("security", new JsonArray());
+      final var components = resolveComponents(registrant);
+      if (!components.isEmpty()) {
+        spec.put("components", components);
+      }
+      if (securitySchemeKey(components) != null) {
+        spec.put("security", new JsonArray());
+      }
+
+      final var groups = buildGroupDescriptionsExtension(registrant);
+      if (!groups.isEmpty()) {
+        spec.put("x-groups", groups);
+      }
+      return spec;
+    } finally {
+      ACTIVE_COMPONENTS.remove();
     }
-
-    final var groups = buildGroupDescriptionsExtension(registrant);
-    if (!groups.isEmpty()) {
-      spec.put("x-groups", groups);
-    }
-
-    return spec;
   }
 
   private static JsonObject buildInfo(DocumentationRegistrant registrant) {
@@ -140,7 +200,7 @@ public final class OpenApi3Generator {
       operation.put("parameters", parameters);
     }
 
-    final var requestBody = buildRequestBody(description);
+    final var requestBody = buildRequestBody(description, routePath);
     if (requestBody != null) {
       operation.put("requestBody", requestBody);
     }
@@ -217,7 +277,22 @@ public final class OpenApi3Generator {
     }
   }
 
-  private static JsonObject buildRequestBody(RouteDescription description) {
+  private static JsonObject buildRequestBody(RouteDescription description, String routePath) {
+    final var requestBody = buildRequestBodyDefinition(description);
+    if (requestBody == null) {
+      return null;
+    }
+
+    final var typeName = description.requestBodyClass() == null
+      ? "Multipart"
+      : componentName(description.requestBodyClass());
+    final var name = description.fileParameters().isEmpty()
+      ? "RequestBody<%s>".formatted(typeName)
+      : "RequestBody<%s>".formatted(operationId(description.name(), routePath));
+    return componentReference("requestBodies", name, requestBody);
+  }
+
+  private static JsonObject buildRequestBodyDefinition(RouteDescription description) {
     final var fileParameters = description.fileParameters();
     if (fileParameters != null && !fileParameters.isEmpty()) {
       final var properties = new JsonObject();
@@ -247,7 +322,7 @@ public final class OpenApi3Generator {
       final var dtoClass = description.requestBodyClass();
       if (dtoClass != null && dtoClass != Void.class) {
         content.put("application/json", new JsonObject()
-          .put("schema", schemaForClass(dtoClass)));
+          .put("schema", schemaReferenceForClass(dtoClass)));
       }
       return new JsonObject()
         .put("required", true)
@@ -271,7 +346,7 @@ public final class OpenApi3Generator {
       .put("type", "object")
       .put("additionalProperties", true);
 
-    final var jsonMediaType = new JsonObject().put("schema", schemaForClass(dtoClass));
+    final var jsonMediaType = new JsonObject().put("schema", schemaReferenceForClass(dtoClass));
     final var examples = collectExamples(dtoClass);
     if (!examples.isEmpty()) {
       jsonMediaType.put("example", examples.getFirst());
@@ -288,14 +363,13 @@ public final class OpenApi3Generator {
     final var responses = new JsonObject();
 
     if (description.responseDTOs() == null || description.responseDTOs().isEmpty()) {
-      responses.put("200", new JsonObject().put("description", "Successful operation"));
+      responses.put("200", componentReference("responses", "Response<200,Empty>",
+        new JsonObject().put("description", "Successful operation")));
       return responses;
     }
 
     description.responseDTOs().forEach((code, dto) -> {
-      final var typeName = dto instanceof RouteDescription.ResponseCasing casing
-        ? casing.innerTypeName()
-        : dto.getClass().getSimpleName();
+      final var typeName = responseTypeName(dto);
 
       final var mediaType = new JsonObject()
         .put("example", parseExample(dto.toExample()));
@@ -305,19 +379,33 @@ public final class OpenApi3Generator {
         mediaType.put("schema", schema);
       }
 
-      responses.put(String.valueOf(code), new JsonObject()
+      final var response = new JsonObject()
         .put("description", "%s (%s)".formatted(
           code >= 400 ? "Error response" : "Successful operation", nonNull(typeName)))
         .put("content", new JsonObject()
-          .put("application/json", mediaType)));
+          .put("application/json", mediaType));
+      responses.put(String.valueOf(code), componentReference("responses",
+        "Response<%s,%s>".formatted(code, typeName), response));
     });
 
     return responses;
   }
 
+  private static String responseTypeName(DocumentableDTO dto) {
+    if (!(dto instanceof RouteDescription.ResponseCasing casing)) {
+      return componentName(dto.getClass());
+    }
+    if (casing.documentedClass() != null) {
+      return componentName(casing.documentedClass());
+    }
+    return casing.data() == null ? "Response" : componentName(casing.data().getClass());
+  }
+
   private static JsonObject responseSchema(DocumentableDTO dto) {
     if (dto instanceof RouteDescription.ResponseCasing casing) {
-      final var dataClass = resolvableClass(casing.data());
+      // The builder records the declared response DTO class.  An @ResponseExample
+      // field supplies a value only; its field type must not redefine the schema.
+      final var dataClass = casing.documentedClass();
       if (dataClass == null) {
         return null;
       }
@@ -327,11 +415,11 @@ public final class OpenApi3Generator {
         .put("properties", new JsonObject()
           .put("status", new JsonObject().put("type", "string").put("enum", new JsonArray().add("success").add("error")))
           .put("message", new JsonObject().put("type", "string"))
-          .put("data", schemaForClass(dataClass)));
+          .put("data", schemaReferenceForClass(dataClass)));
     }
 
     final var clazz = resolvableClass(dto);
-    return clazz == null ? null : schemaForClass(clazz);
+    return clazz == null ? null : schemaReferenceForClass(clazz);
   }
 
   private static Class<?> resolvableClass(DocumentableDTO dto) {
@@ -347,16 +435,6 @@ public final class OpenApi3Generator {
       return null;
     }
 
-    final var dtoClass = dto.getClass();
-    try {
-      for (Field field : dtoClass.getDeclaredFields()) {
-        if (field.isAnnotationPresent(ResponseExample.class)) {
-          return field.getType();
-        }
-      }
-    } catch (NoClassDefFoundError | SecurityException e) {
-      // Fallback if field reflection fails
-    }
     return clazz;
   }
 
@@ -461,25 +539,65 @@ public final class OpenApi3Generator {
 
   private static JsonObject resolveComponents(DocumentationRegistrant registrant) {
     final var authSettings = registrant.getAuthSettings();
+    final var registry = components();
+    final var result = registry.toJson();
     if ((authSettings == null || authSettings.isEmpty()) && !routeRegistersAuthentication(registrant)) {
-      return null;
+      return result;
     }
 
-    String headerName = "Authorization";
-    if (authSettings != null && !authSettings.isEmpty()) {
-      final var firstKey = authSettings.keySet().iterator().next();
-      if (firstKey != null && !firstKey.isBlank()) {
-        headerName = firstKey;
-      }
-    }
+    final var authHeaders = registrant.getAuthenticatedGlobalHeaders();
 
-    return new JsonObject()
-      .put("securitySchemes", new JsonObject()
+    for (final var header : authHeaders.entrySet()) {
+      final var headerName = header.getKey();
+      final var description = header.getValue();
+      result.put("securitySchemes", new JsonObject()
         .put("authentication", new JsonObject()
           .put("type", "apiKey")
           .put("in", "header")
           .put("name", headerName)
-          .put("description", buildAuthenticationDescription(authSettings))));
+          .put("description", description)));
+    }
+    return result;
+  }
+
+  private static ComponentRegistry components() {
+    final var registry = ACTIVE_COMPONENTS.get();
+    if (registry == null) {
+      throw new IllegalStateException("OpenAPI components are only available while generating a document");
+    }
+    return registry;
+  }
+
+  private static JsonObject componentReference(String section, String name, JsonObject definition) {
+    final var entries = components().section(section);
+    if (!entries.containsKey(name)) {
+      entries.put(name, definition);
+    }
+    return new JsonObject().put("$ref", "#/components/%s/%s".formatted(section, name));
+  }
+
+  private static final class ComponentRegistry {
+    private final JsonObject schemas = new JsonObject();
+    private final JsonObject requestBodies = new JsonObject();
+    private final JsonObject responses = new JsonObject();
+
+    JsonObject section(String name) {
+      return switch (name) {
+        case "schemas" -> schemas;
+        case "requestBodies" -> requestBodies;
+        case "responses" -> responses;
+        default ->
+          throw new IllegalArgumentException("Unsupported component section: " + name);
+      };
+    }
+
+    JsonObject toJson() {
+      final var result = new JsonObject();
+      if (!schemas.isEmpty()) result.put("schemas", schemas);
+      if (!requestBodies.isEmpty()) result.put("requestBodies", requestBodies);
+      if (!responses.isEmpty()) result.put("responses", responses);
+      return result;
+    }
   }
 
   private static String buildAuthenticationDescription(Map<String, String> authSettings) {
@@ -568,8 +686,110 @@ public final class OpenApi3Generator {
     return schemaForClass(clazz, new HashSet<>());
   }
 
+  /** Returns a component reference for a structured type, while scalar schemas stay inline. */
+  private static JsonObject schemaReferenceForClass(Class<?> clazz) {
+    return schemaReferenceForType(clazz);
+  }
+
+  private static JsonObject schemaReferenceForType(Type type) {
+    final var clazz = rawClass(type);
+    if (!isStructuredType(clazz)) {
+      return schemaForType(type, new HashSet<>(), Map.of());
+    }
+
+    final var name = componentName(type);
+    final var componentSchemas = components().section("schemas");
+    if (!componentSchemas.containsKey(name)) {
+      for (final var field : clazz.getDeclaredFields()) {
+        //! This is a patch to fix a bug. Do not REMOVE!!! If you have any desire to
+        //! remove it, ASK ME BEFORE YOU DO SO!
+        if (field.isAnnotationPresent(ResponseExample.class) && !field.getType().equals(clazz)) {
+          final var fieldType = field.getType();
+          componentSchemas.put(name, new JsonObject());
+          final var inline = Optional.ofNullable(INLINE_COMPONENT_DEFINITIONS.get()).orElseGet(HashSet::new);
+          INLINE_COMPONENT_DEFINITIONS.set(inline);
+          inline.add(fieldType);
+          try {
+            componentSchemas.put(name, schemaForType(fieldType, new HashSet<>(), typeBindings(fieldType)));
+          } finally {
+            inline.remove(fieldType);
+            if (inline.isEmpty()) INLINE_COMPONENT_DEFINITIONS.remove();
+          }
+          return new JsonObject().put("$ref", "#/components/schemas/" + name);
+        }
+      }
+
+      // Register a placeholder before resolving fields so self-referential DTOs
+      // resolve back to this component rather than recursing indefinitely.
+      componentSchemas.put(name, new JsonObject());
+      final var inline = Optional.ofNullable(INLINE_COMPONENT_DEFINITIONS.get()).orElseGet(HashSet::new);
+      INLINE_COMPONENT_DEFINITIONS.set(inline);
+      inline.add(clazz);
+      try {
+        componentSchemas.put(name, schemaForType(clazz, new HashSet<>(), typeBindings(type)));
+      } finally {
+        inline.remove(clazz);
+        if (inline.isEmpty()) INLINE_COMPONENT_DEFINITIONS.remove();
+      }
+    }
+    return new JsonObject().put("$ref", "#/components/schemas/" + name);
+  }
+
+  private static boolean isStructuredType(Class<?> clazz) {
+    return clazz != null
+      && clazz != Object.class
+      && scalarSchema(clazz) == null
+      && !clazz.isArray()
+      && !Collection.class.isAssignableFrom(clazz)
+      && !Map.class.isAssignableFrom(clazz)
+      && !JsonObject.class.isAssignableFrom(clazz)
+      && !JsonArray.class.isAssignableFrom(clazz)
+      && !clazz.isInterface()
+      && !Modifier.isAbstract(clazz.getModifiers());
+  }
+
   private static JsonObject schemaForClass(Class<?> clazz, Set<Class<?>> resolving) {
-    if (clazz == null || clazz == Object.class) {
+    return schemaForType(clazz, resolving, Map.of());
+  }
+
+  private static JsonObject schemaForType(Type type, Set<Class<?>> resolving, Map<TypeVariable<?>, Type> bindings) {
+    type = resolveType(type, bindings);
+    if (type instanceof ParameterizedType parameterizedType) {
+      final var raw = parameterizedType.getRawType();
+      final var arguments = parameterizedType.getActualTypeArguments();
+      if (raw instanceof Class<?> rawClass) {
+        if (Collection.class.isAssignableFrom(rawClass)) {
+          final var item = collectionElementType(parameterizedType, bindings);
+          return collectionSchema(parameterizedType, item, resolving, bindings);
+        }
+        if (Map.class.isAssignableFrom(rawClass)) {
+          final var value = arguments.length > 1 ? arguments[1] : Object.class;
+          return new JsonObject().put("type", "object")
+            .put("additionalProperties", schemaForType(value, resolving, bindings));
+        }
+        if (Optional.class.isAssignableFrom(rawClass)) {
+          return arguments.length == 0 ? new JsonObject() : schemaForType(arguments[0], resolving, bindings);
+        }
+        if (ACTIVE_COMPONENTS.get() != null && isStructuredType(rawClass)) {
+          return schemaReferenceForType(parameterizedType);
+        }
+        return schemaForClass(rawClass, resolving);
+      }
+    }
+    if (type instanceof GenericArrayType arrayType) {
+      return new JsonObject().put("type", "array")
+        .put("items", schemaForType(arrayType.getGenericComponentType(), resolving, bindings));
+    }
+    if (type instanceof WildcardType wildcard) {
+      final var bounds = wildcard.getUpperBounds();
+      return bounds.length == 0 ? new JsonObject() : schemaForType(bounds[0], resolving, bindings);
+    }
+    if (type instanceof TypeVariable<?> variable) {
+      final var bound = bindings.get(variable);
+      return bound == null ? new JsonObject() : schemaForType(bound, resolving, bindings);
+    }
+    if (!(type instanceof Class<?> clazz)) return new JsonObject();
+    if (clazz == Object.class) {
       return new JsonObject();
     }
 
@@ -582,17 +802,21 @@ public final class OpenApi3Generator {
       return scalar;
     }
 
+    if (ACTIVE_COMPONENTS.get() != null && isStructuredType(clazz)
+      && !Optional.ofNullable(INLINE_COMPONENT_DEFINITIONS.get()).orElseGet(Set::of).contains(clazz)) {
+      return schemaReferenceForClass(clazz);
+    }
+
     if (clazz.isArray()) {
       return new JsonObject()
         .put("type", "array")
-        .put("items", schemaForType(clazz.getComponentType(), resolving));
+        .put("items", schemaForType(clazz.getComponentType(), resolving, bindings));
     }
 
     if (Collection.class.isAssignableFrom(clazz)) {
-      final var itemType = clazz.getTypeParameters()[0].getBounds()[0];
       return new JsonObject()
         .put("type", "array")
-        .put("items", schemaForType(itemType, resolving));
+        .put("items", schemaForType(collectionElementType(clazz, bindings), resolving, bindings));
     }
 
     if (Map.class.isAssignableFrom(clazz) || JsonObject.class.isAssignableFrom(clazz)) {
@@ -613,23 +837,27 @@ public final class OpenApi3Generator {
 
     // Cycle guard: nested beans that reference each other must not recurse forever.
     if (!resolving.add(clazz)) {
-      return new JsonObject();
+      return ACTIVE_COMPONENTS.get() != null ? schemaReferenceForClass(clazz) : new JsonObject();
     }
 
     try {
       final var properties = new JsonObject();
       final var required = new JsonArray();
 
-      for (Class<?> current = clazz; current != null && current != Object.class; current = current.getSuperclass()) {
+      var currentBindings = new HashMap<>(bindings);
+      for (Class<?> current = clazz; current != null && current != Object.class; ) {
         for (Field field : current.getDeclaredFields()) {
           if (Modifier.isStatic(field.getModifiers()) || field.isSynthetic()) {
             continue;
           }
-          properties.put(propertyName(field), schemaForType(field.getGenericType(), resolving));
+          properties.put(propertyName(field), schemaForType(field.getGenericType(), resolving, currentBindings));
           if (field.isAnnotationPresent(NotNull.class) || field.isAnnotationPresent(jakarta.validation.constraints.NotNull.class)) {
             required.add(propertyName(field));
           }
         }
+        final var genericSuperclass = current.getGenericSuperclass();
+        currentBindings = inheritedTypeBindings(genericSuperclass, currentBindings);
+        current = rawClass(genericSuperclass);
       }
 
       final var schema = new JsonObject().put("type", "object");
@@ -648,43 +876,118 @@ public final class OpenApi3Generator {
   }
 
   private static JsonObject schemaForType(Type type, Set<Class<?>> resolving) {
+    return schemaForType(type, resolving, Map.of());
+  }
+
+  private static JsonObject collectionSchema(Type collectionType, Type itemType,
+                                             Set<Class<?>> resolving, Map<TypeVariable<?>, Type> bindings) {
+    if (ACTIVE_COMPONENTS.get() == null) {
+      return new JsonObject().put("type", "array").put("items", schemaForType(itemType, resolving, bindings));
+    }
+    final var key = componentName(collectionType);
+    final var schemas = components().section("schemas");
+    if (!schemas.containsKey(key)) {
+      schemas.put(key, new JsonObject());
+      schemas.put(key, new JsonObject().put("type", "array")
+        .put("items", schemaForType(itemType, resolving, bindings)));
+    }
+    return new JsonObject().put("$ref", "#/components/schemas/" + key);
+  }
+
+  /**
+   * Resolves collection subclasses too (for example, {@code UserList extends
+   * ArrayList<User>}), instead of falling back to the raw collection variable
+   * {@code E}.  This is also used after a generic superclass binding is applied.
+   */
+  private static Type collectionElementType(Type type, Map<TypeVariable<?>, Type> bindings) {
+    type = resolveType(type, bindings);
+    final var clazz = rawClass(type);
+    if (clazz == null || !Collection.class.isAssignableFrom(clazz)) return Object.class;
+
+    final var localBindings = new HashMap<>(bindings);
     if (type instanceof ParameterizedType parameterizedType) {
-      final var raw = parameterizedType.getRawType();
+      final var variables = clazz.getTypeParameters();
       final var arguments = parameterizedType.getActualTypeArguments();
-
-      if (raw instanceof Class<?> rawClass) {
-        if (Collection.class.isAssignableFrom(rawClass)) {
-          final var item = arguments.length > 0 ? schemaForType(arguments[0], resolving) : new JsonObject();
-          return new JsonObject().put("type", "array").put("items", item);
-        }
-        if (Map.class.isAssignableFrom(rawClass)) {
-          final var value = arguments.length > 1 ? schemaForType(arguments[1], resolving) : new JsonObject();
-          return new JsonObject().put("type", "object").put("additionalProperties", value);
-        }
-        if (Optional.class.isAssignableFrom(rawClass)) {
-          return arguments.length > 0 ? schemaForType(arguments[0], resolving) : new JsonObject();
-        }
+      for (int index = 0; index < Math.min(variables.length, arguments.length); index++) {
+        localBindings.put(variables[index], resolveType(arguments[index], bindings));
       }
-
-      return schemaForType(raw, resolving);
     }
 
-    if (type instanceof GenericArrayType genericArrayType) {
-      return new JsonObject()
-        .put("type", "array")
-        .put("items", schemaForType(genericArrayType.getGenericComponentType(), resolving));
+    if (clazz == Collection.class) {
+      final var variable = clazz.getTypeParameters()[0];
+      return resolveType(localBindings.getOrDefault(variable, Object.class), localBindings);
     }
 
-    if (type instanceof WildcardType wildcardType) {
-      final var upperBounds = wildcardType.getUpperBounds();
-      return upperBounds.length > 0 ? schemaForType(upperBounds[0], resolving) : new JsonObject();
+    for (Type interfaceType : clazz.getGenericInterfaces()) {
+      final var candidate = collectionElementType(interfaceType, localBindings);
+      if (candidate != Object.class) return candidate;
+    }
+    final var superclass = clazz.getGenericSuperclass();
+    return superclass == null ? Object.class : collectionElementType(superclass, localBindings);
+  }
+
+  private static Class<?> rawClass(Type type) {
+    if (type instanceof Class<?> clazz) return clazz;
+    if (type instanceof ParameterizedType parameterizedType && parameterizedType.getRawType() instanceof Class<?> clazz)
+      return clazz;
+    return null;
+  }
+
+  private static Map<TypeVariable<?>, Type> typeBindings(Type type) {
+    if (!(type instanceof ParameterizedType parameterizedType) || !(parameterizedType.getRawType() instanceof Class<?> raw)) {
+      return Map.of();
+    }
+    final var bindings = new HashMap<TypeVariable<?>, Type>();
+    final var variables = raw.getTypeParameters();
+    final var arguments = parameterizedType.getActualTypeArguments();
+    for (int index = 0; index < Math.min(variables.length, arguments.length); index++) {
+      bindings.put(variables[index], arguments[index]);
+    }
+    return bindings;
+  }
+
+  private static Type resolveType(Type type, Map<TypeVariable<?>, Type> bindings) {
+    if (type instanceof TypeVariable<?> variable)
+      return bindings.getOrDefault(variable, variable);
+    if (type instanceof ParameterizedType parameterizedType) {
+      final var arguments = Arrays.stream(parameterizedType.getActualTypeArguments())
+        .map(argument -> resolveType(argument, bindings)).toArray(Type[]::new);
+      return new ResolvedParameterizedType((Class<?>) parameterizedType.getRawType(), arguments, parameterizedType.getOwnerType());
+    }
+    return type;
+  }
+
+  private static HashMap<TypeVariable<?>, Type> inheritedTypeBindings(Type superclass,
+                                                                      Map<TypeVariable<?>, Type> bindings) {
+    final var inherited = new HashMap<TypeVariable<?>, Type>();
+    if (!(superclass instanceof ParameterizedType parameterizedType)
+      || !(parameterizedType.getRawType() instanceof Class<?> raw)) {
+      return inherited;
+    }
+    final var variables = raw.getTypeParameters();
+    final var arguments = parameterizedType.getActualTypeArguments();
+    for (int index = 0; index < Math.min(variables.length, arguments.length); index++) {
+      inherited.put(variables[index], resolveType(arguments[index], bindings));
+    }
+    return inherited;
+  }
+
+  private record ResolvedParameterizedType(Class<?> rawType, Type[] actualTypeArguments,
+                                           Type ownerType) implements ParameterizedType {
+    @Override
+    public Type @NotNull [] getActualTypeArguments() {
+      return actualTypeArguments.clone();
     }
 
-    if (type instanceof Class<?> clazz) {
-      return schemaForClass(clazz, resolving);
+    @Override
+    public @NotNull Type getRawType() {
+      return rawType;
     }
 
-    return new JsonObject();
+    @Override
+    public Type getOwnerType() {
+      return ownerType;
+    }
   }
 
   private static JsonObject enumSchema(Class<?> enumClass) {

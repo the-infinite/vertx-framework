@@ -12,6 +12,8 @@ import io.github.the_infinite.framework.deploy.ConsumerVerticle;
 import io.github.the_infinite.framework.deploy.ServerVerticle;
 import io.github.the_infinite.framework.deploy.SocketVerticle;
 import io.github.the_infinite.framework.deploy.WorkerVerticle;
+import io.github.the_infinite.framework.doc.DocumentationController;
+import io.github.the_infinite.framework.doc.DocumentationRegistrant;
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.gateway.GatewayConnect;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
@@ -64,6 +66,7 @@ public final class GenericStartup {
 
     //? Now, use the static registrar to register static resources.
     staticRegistrar.registerStatic(staticVertx);
+    DocumentationRegistrant.getInstance().bindBase(mountPaths);
 
     //? Let us initialize the service configuration itself.
     try {
@@ -96,6 +99,11 @@ public final class GenericStartup {
       for (final var controller : controllers) {
         serverConfig.mountController(controller);
       }
+
+      //* You do this ONLY after all the HTTP controllers have been properly mounted.
+      final var building =  globalConsole.time("Build OpenAPI documentation");
+      DocumentationController.buildSpecs(); // Build this ONCE and only here.
+      building.end();
 
       //? Finally, deploy this verticle.
       serverVertx.deployVerticle(ServerVerticle::new, new DeploymentOptions().setHa(true).setWorkerPoolName("Server-Pool").setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getServerCount())).setInstances(env.getServerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy server: %s".formatted(throwable.getMessage())));

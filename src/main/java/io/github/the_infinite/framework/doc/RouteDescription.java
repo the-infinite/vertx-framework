@@ -198,7 +198,7 @@ public record RouteDescription(String group,
       String message = statusCode >= 500 ? "Internal server error"
         : statusCode >= 400 ? "Bad request"
         : "Operation completed successfully";
-      this.responseDTOs.put(statusCode, new ResponseCasing(status, message, innerInstance));
+      this.responseDTOs.put(statusCode, new ResponseCasing(status, message, innerInstance, dtoClass));
       return this;
     }
 
@@ -341,7 +341,12 @@ public record RouteDescription(String group,
    * Every response is wrapped in this shell with a status, message, and data payload.
    */
   public record ResponseCasing(String status, String message,
-                                      @Nullable DocumentableDTO data) implements DocumentableDTO {
+                                      @Nullable DocumentableDTO data,
+                                      @Nullable Class<? extends DocumentableDTO> documentedClass) implements DocumentableDTO {
+    /** Retains source compatibility for explicitly constructed response envelopes. */
+    public ResponseCasing(String status, String message, @Nullable DocumentableDTO data) {
+      this(status, message, data, data == null ? null : data.getClass().asSubclass(DocumentableDTO.class));
+    }
     @Override
     public String toExample() {
       Object parsedData = null;

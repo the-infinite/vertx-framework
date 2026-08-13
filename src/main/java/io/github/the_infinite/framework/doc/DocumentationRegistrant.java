@@ -40,6 +40,7 @@ public class DocumentationRegistrant {
     private Integer globalRateLimit;
     @Getter
     private DocumentationMode documentationMode = DocumentationMode.CONVENTIONAL;
+    String basePath;
 
     private DocumentationRegistrant() {
         registerHttpClient(new ClassicHttpClient());
@@ -55,6 +56,10 @@ public class DocumentationRegistrant {
     public void setGlobalHeaders(Map<String, String> headers) {
         this.legacyGlobalHeaders.clear();
         this.legacyGlobalHeaders.putAll(headers);
+    }
+
+    public void bindBase(List<String> roots) {
+      this.basePath = roots.getFirst();
     }
 
     public Map<String, String> getGlobalHeaders() {
