@@ -726,15 +726,16 @@ public final class OpenApi3Generator {
         //! This is a patch to fix a bug. Do not REMOVE!!! If you have any desire to
         //! remove it, ASK ME BEFORE YOU DO SO!
         if (field.isAnnotationPresent(ResponseExample.class) && !field.getType().equals(clazz)) {
-          final var fieldType = field.getType();
+          final var fieldType = field.getGenericType();
+          final var fieldClass = rawClass(fieldType);
           componentSchemas.put(name, new JsonObject());
           final var inline = Optional.ofNullable(INLINE_COMPONENT_DEFINITIONS.get()).orElseGet(HashSet::new);
           INLINE_COMPONENT_DEFINITIONS.set(inline);
-          inline.add(fieldType);
+          inline.add(fieldClass);
           try {
             componentSchemas.put(name, schemaForType(fieldType, new HashSet<>(), typeBindings(fieldType)));
           } finally {
-            inline.remove(fieldType);
+            inline.remove(fieldClass);
             if (inline.isEmpty()) INLINE_COMPONENT_DEFINITIONS.remove();
           }
           return new JsonObject().put("$ref", "#/components/schemas/" + name);
