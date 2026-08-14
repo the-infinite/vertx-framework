@@ -81,7 +81,8 @@ public final class OpenApi3Generator {
 
   private static String displayName(Class<?> clazz) {
     final var chain = new ArrayDeque<String>();
-    for (Class<?> current = clazz; current != null; current = current.getEnclosingClass()) chain.addFirst(current.getSimpleName());
+    for (Class<?> current = clazz; current != null; current = current.getEnclosingClass())
+      chain.addFirst(current.getSimpleName());
     return String.join(".", chain);
   }
 
@@ -100,7 +101,8 @@ public final class OpenApi3Generator {
           .map(OpenApi3Generator::typeIdentity)
           .collect(java.util.stream.Collectors.joining(",")) + ">";
     }
-    if (type instanceof GenericArrayType arrayType) return typeIdentity(arrayType.getGenericComponentType()) + "[]";
+    if (type instanceof GenericArrayType arrayType)
+      return typeIdentity(arrayType.getGenericComponentType()) + "[]";
     if (type instanceof TypeVariable<?> variable) {
       return variable.getGenericDeclaration().toString() + ":" + variable.getName();
     }
@@ -123,7 +125,7 @@ public final class OpenApi3Generator {
       final var spec = new JsonObject()
         .put("openapi", OPENAPI_VERSION)
         .put("info", buildInfo(registrant))
-        .put("servers", buildServers())
+        .put("servers", buildServers(registrant))
         .put("paths", buildPaths(registrant));
 
       final var components = resolveComponents(registrant);
@@ -160,8 +162,10 @@ public final class OpenApi3Generator {
     return info;
   }
 
-  private static JsonArray buildServers() {
-    return new JsonArray().add(new JsonObject().put("url", "/"));
+  private static JsonArray buildServers(DocumentationRegistrant registrant) {
+    return new JsonArray()
+      .add(new JsonObject().put("url", "%s/".formatted(registrant.basePath)))
+      .add(new JsonObject().put("url", "/"));
   }
 
   private static String buildGlobalDescription(DocumentationRegistrant registrant) {
@@ -814,7 +818,8 @@ public final class OpenApi3Generator {
     }
     if (type instanceof WildcardType wildcard) {
       final var lowerBounds = wildcard.getLowerBounds();
-      if (lowerBounds.length > 0) return schemaForType(lowerBounds[0], resolving, bindings);
+      if (lowerBounds.length > 0)
+        return schemaForType(lowerBounds[0], resolving, bindings);
       final var upperBounds = wildcard.getUpperBounds();
       return upperBounds.length == 0 || upperBounds[0] == Object.class
         ? new JsonObject()
