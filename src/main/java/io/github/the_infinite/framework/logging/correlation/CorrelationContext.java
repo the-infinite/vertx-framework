@@ -19,7 +19,7 @@ import io.vertx.ext.web.validation.RequestParameters;
 import io.vertx.ext.web.validation.ValidationHandler;
 
 @SuppressWarnings("unused")
-public final class CorrelationContext {
+public final class CorrelationContext implements AutoCloseable {
   private static final String CONTEXT_KEY = "CORRELATION_ID";
   private static final String CONTEXT_USER = "TVT_USER_ID";
   private final RoutingContext routingContext;
@@ -150,6 +150,10 @@ public final class CorrelationContext {
   }
 
   //? Getting the correlation context here as needed.
+  @Override
+  public void close() throws Exception {
+    cleanup();
+  }
 
   /**
    * Cleans up the correlation context. This will close any running database sessions if
@@ -163,7 +167,8 @@ public final class CorrelationContext {
     final var foundSession = session.get();
     try {
       foundSession.flush();
-    } catch (Exception ignored) { }
+    } catch (Exception ignored) {
+    }
     foundSession.close();
     session.set(null);
   }
