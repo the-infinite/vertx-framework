@@ -5,6 +5,7 @@ import org.hibernate.SessionFactory;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.github.the_infinite.framework.middleware.GeneralMiddlewares;
@@ -25,6 +26,7 @@ public final class CorrelationContext implements AutoCloseable {
   private final RoutingContext routingContext;
   private final AtomicReference<Session> session;
   private final Context vertxContext;
+  private final AtomicBoolean holdLock;
 
   //? This is fine too.
   private CorrelationContext(@NotNull RoutingContext routingContext) {
@@ -38,6 +40,7 @@ public final class CorrelationContext implements AutoCloseable {
     //? This is fine too.
     this.routingContext = routingContext;
     this.vertxContext = null;
+    this.holdLock = new AtomicBoolean(false);
     this.session = new AtomicReference<>(null);
   }
 
@@ -52,6 +55,7 @@ public final class CorrelationContext implements AutoCloseable {
     //? This is fine too.
     this.routingContext = null;
     this.vertxContext = vertxContext;
+    this.holdLock = new AtomicBoolean(false);
     this.session = new AtomicReference<>(null);
   }
 
@@ -155,12 +159,20 @@ public final class CorrelationContext implements AutoCloseable {
     cleanup();
   }
 
+  public void holdLock() {
+    holdLock.set(true);
+  }
+
+  public void releaseLock() {
+    holdLock.set(false);
+  }
+
   /**
    * Cleans up the correlation context. This will close any running database sessions if
    * they exist.
    */
   public void cleanup() {
-    if (session == null || session.get() == null) {
+    if (session == null || session.get() == null || holdLock.get()) {
       return;
     }
 
