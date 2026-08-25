@@ -240,6 +240,18 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     });
   }
 
+
+  @Override
+  public Future<List<TModel>> getAll(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
+    final var usedCursor = options.getCursor();
+    final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
+    return this.getOrCreateSession(transaction, options, (session, _) -> {
+      final var data = session.createQuery(usedFilters.select().query()).getResultList();
+      this.prepareDetached(session, options, data);
+      return data;
+    });
+  }
+
   @Override
   public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     final var usedCursor = options.getCursor();

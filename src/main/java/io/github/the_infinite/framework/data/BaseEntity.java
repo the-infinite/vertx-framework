@@ -2,6 +2,7 @@ package io.github.the_infinite.framework.data;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -27,11 +28,13 @@ public abstract class BaseEntity implements Serializable {
   private UUID uid;
 
   @CreationTimestamp
-  @Column(updatable = false, nullable = false, columnDefinition = "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP")
+  @Column(updatable = false, nullable = false, columnDefinition = "TIMESTAMPTZ")
+  @ColumnDefault("CURRENT_TIMESTAMP")
   private OffsetDateTime createdAt;
 
   @UpdateTimestamp
-  @Column(nullable = false, columnDefinition = "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP")
+  @Column(nullable = false, columnDefinition = "TIMESTAMPTZ")
+  @ColumnDefault("CURRENT_TIMESTAMP")
   private OffsetDateTime updatedAt;
 
   //? Okay then.

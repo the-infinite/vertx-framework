@@ -250,6 +250,36 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * <p>
    * Notes:
    * - If `options.cursor` is provided, an additional filter `primaryKey > cursor` is applied.
+   * - If a transaction is provided, it will be used; otherwise, a new session will be created.
+   *
+   * @param filter      The optional JPA `CriteriaQuery` used to filter the results.
+   * @param options     The optional pagination options for the `cursor`.
+   * @param transaction The optional transactional session to use for the query. If null, a new session is created.
+   * @return A `Future` that resolves to a list of entities matching the criteria.
+   */
+  public Future<List<TModel>> getAll(
+    @Nullable QueryData<TModel> filter,
+    @NotNull RepositoryOptions<TModel> options,
+    @Nullable Session transaction
+  ) {
+    return this.statefulRepositoryActor.getAll(filter, options, transaction);
+  }
+
+  /**
+   * @see #getMany(QueryData, RepositoryOptions, Session)
+   */
+  public Future<List<TModel>> getAll(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
+    return this.getAll(filter, options, null);
+  }
+
+  /**
+   * Retrieves a list of entities based on the provided filter and pagination options.
+   * <p>
+   * This method executes a database query to fetch a list of entities that match the given criteria.
+   * It supports cursor-based pagination and allows for optional transaction management.
+   * <p>
+   * Notes:
+   * - If `options.cursor` is provided, an additional filter `primaryKey > cursor` is applied.
    * - If `options.limit` is not provided, the default limit is 30.
    * - If a transaction is provided, it will be used; otherwise, a new session will be created.
    *

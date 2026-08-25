@@ -141,6 +141,13 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
   }
 
   @Override
+  public Future<List<TModel>> getAll(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable StatelessSession transaction) {
+    final var usedCursor = options.getCursor();
+    final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
+    return this.getOrCreateSession(transaction, options, (session, _) -> session.createQuery(usedFilters.select().query()).getResultList());
+  }
+
+  @Override
   public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable StatelessSession transaction) {
     final var usedCursor = options.getCursor();
     final var usedLimit = options.getLimit();

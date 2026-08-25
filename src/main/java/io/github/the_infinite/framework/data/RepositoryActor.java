@@ -200,6 +200,8 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
 
   abstract public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
+  abstract public Future<List<TModel>> getAll(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
+
   abstract public Future<List<TModel>> getDistinctRows(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
   abstract public Future<Optional<TModel>> getOne(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
@@ -255,6 +257,13 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
    */
   public Future<List<TModel>> getMany(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
     return this.getMany(filter, options, null);
+  }
+
+  /**
+   * @see #getAll(QueryData, RepositoryOptions, TSession)
+   */
+  public Future<List<TModel>> getAll(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options) {
+    return this.getAll(filter, options, null);
   }
 
   /**
