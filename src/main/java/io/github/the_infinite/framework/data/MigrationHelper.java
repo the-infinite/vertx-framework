@@ -670,7 +670,7 @@ public class MigrationHelper {
    * Normalizes a default-value expression for comparison. PostgreSQL stores literal defaults with a
    * trailing type cast (e.g. {@code 'x'::text}, {@code 'x'::character varying},
    * {@code 'x'::timestamp without time zone}, {@code 'x'::text[]}) and sometimes wraps expression
-   * defaults in parentheses. We strip both so the comparison focuses on the actual value rather than
+   * defaults in parentheses. We strip both, so the comparison focuses on the actual value rather than
    * on representation differences between the model and the live catalog.
    */
   private static String normalizeDefault(final String expression) {

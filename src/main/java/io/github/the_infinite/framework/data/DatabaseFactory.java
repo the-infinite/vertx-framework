@@ -22,7 +22,6 @@ import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.response.ErrorResult;
 import io.github.the_infinite.framework.utils.DataHelpers;
-import io.github.the_infinite.framework.utils.ValidationHelper;
 import io.reactiverse.elasticsearch.client.RestHighLevelClient;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -231,7 +230,6 @@ public final class DatabaseFactory {
       props.put("hibernate.hikari.connectionTimeout", 5_000L);
       props.put("jakarta.persistence.schema-generation.database.action", options.schemaGenerateAction);
       props.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
-      props.put("jakarta.persistence.validation.factory", ValidationHelper.getInstance().factory());
 
       //? If this is not a production build.
       if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {

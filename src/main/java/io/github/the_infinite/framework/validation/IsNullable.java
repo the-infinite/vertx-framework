@@ -8,6 +8,6 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.FIELD)
 public @interface IsNullable {
-  boolean value();
+  boolean value() default false;
   String message() default "";
 }

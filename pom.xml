@@ -7,7 +7,7 @@
 
   <groupId>io.github.the-infinite</groupId>
   <artifactId>framework</artifactId>
-  <version>1.0.37-final</version>
+  <version>1.0.38</version>
   <packaging>jar</packaging>
 
   <name>Vert.x-based Framework</name>
@@ -105,16 +105,6 @@
     <dependency>
       <groupId>io.vertx</groupId>
       <artifactId>vertx-web-validation</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>jakarta.validation</groupId>
-      <artifactId>jakarta.validation-api</artifactId>
-      <version>4.0.0-M1</version>
-    </dependency>
-    <dependency>
-      <groupId>org.hibernate.validator</groupId>
-      <artifactId>hibernate-validator</artifactId>
-      <version>9.1.0.Final</version>
     </dependency>
     <dependency>
       <groupId>com.clickhouse</groupId>

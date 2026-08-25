@@ -12,6 +12,7 @@ import java.time.*;
 import java.util.*;
 
 import io.github.the_infinite.framework.env.AppEnvironment;
+import io.github.the_infinite.framework.validation.IsNullable;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import lombok.extern.slf4j.Slf4j;
@@ -902,7 +903,13 @@ public final class OpenApi3Generator {
           }
           properties.put(propertyName(field), schemaForType(field.getGenericType(), resolving,
             currentBindings));
-          if (field.isAnnotationPresent(NotNull.class) || field.isAnnotationPresent(jakarta.validation.constraints.NotNull.class)) {
+          if (field.isAnnotationPresent(IsNullable.class)) {
+            final var notNull =  field.getAnnotation(IsNullable.class);
+
+            if (notNull != null && !notNull.value()) {
+              required.add(propertyName(field));
+            }
+          } else if(field.isAnnotationPresent(NotNull.class)) {
             required.add(propertyName(field));
           }
         }
