@@ -4,6 +4,8 @@ import org.hibernate.SessionFactory;
 import org.hibernate.boot.Metadata;
 import org.hibernate.boot.MetadataSources;
 import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.mapping.Column;
 import org.hibernate.tool.schema.TargetType;
 import org.hibernate.tool.schema.spi.*;
 
@@ -11,11 +13,11 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URI;
-import java.nio.file.FileSystem;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.*;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -29,10 +31,28 @@ import io.github.the_infinite.framework.utils.DataHelpers;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
+import lombok.extern.slf4j.Slf4j;
 
-@SuppressWarnings({"unused", "CallToPrintStackTrace", "BlockingMethodInNonBlockingContext"})
+@SuppressWarnings({"unused", "BlockingMethodInNonBlockingContext", "deprecation"})
+@Slf4j
 public class MigrationHelper {
   private static final String STATEMENT_BREAKPOINT = "--end of statement";
+
+  /**
+   * Tables that the subtractive diff must never drop, even if they are not part of the entity
+   * model. This protects third-party / infrastructure tables that may live in the same schema as
+   * the application's managed tables.
+   */
+  private static final Set<String> IGNORED_TABLES = Set.of(
+    "__database_migrations",
+    "__database_seeders",
+    "flyway_schema_history",
+    "databasechangelog",
+    "databasechangeloglock",
+    "spatial_ref_sys",
+    "geometry_columns",
+    "geography_columns"
+  );
 
   private static String toJDBCUrl(String url) {
     final var usedUrl = url.trim();
@@ -212,7 +232,14 @@ public class MigrationHelper {
 
     final Map<String, Object> dbConfig = Map.of(
       "jakarta.persistence.jdbc.url", toJDBCUrl(env.getPgUrl()),
-      "hibernate.dialect", org.hibernate.dialect.PostgreSQLDialect.class.getName()
+      "hibernate.dialect", org.hibernate.dialect.PostgreSQLDialect.class.getName(),
+      //? Use RECREATE_QUIETLY so the additive migrator only *adds* missing unique constraints and
+      //? never drops/recreates existing ones. This is critical for anonymous unique constraints
+      //? (e.g. @Column(unique = true) on BaseEntity.uid) which Hibernate names implicitly and which
+      //? the default DROP_RECREATE_QUIETLY strategy would otherwise drop on every single generation.
+      //? Removed unique constraints are handled separately by the subtractive diff pass below.
+      org.hibernate.cfg.SchemaToolingSettings.UNIQUE_CONSTRAINT_SCHEMA_UPDATE_STRATEGY,
+      org.hibernate.tool.schema.UniqueConstraintSchemaUpdateStrategy.RECREATE_QUIETLY
     );
     registryBuilder.applySettings(dbConfig);
 
@@ -284,10 +311,30 @@ public class MigrationHelper {
 
       migrator.doMigration(metadata, options, ContributableMatcher.ALL, targetDescriptor);
 
-      //? Note: By applying all migrations first (at the start of generate()), we ensure the database
-      //? state is correct. This helps SchemaMigrator detect enum type changes and subtractive changes
-      //? more reliably, since it compares against the actual current schema state.
+      //? The additive SchemaMigrator above only ever *adds* tables, columns, indexes and
+      //? constraints. It never detects objects that were removed from or changed in the entity
+      //? model (dropped tables/columns, modified nullability, etc.). We therefore run a second,
+      //? subtractive pass that compares the entity model against the live database and emits the
+      //? corresponding DROP / ALTER statements. By applying all migrations first (above), the
+      //? database already reflects every object that is still part of the model, so anything left
+      //? over in the database but absent from the model is genuinely removed and safe to drop.
+      final var dialect = metadata.getDatabase().getJdbcEnvironment().getDialect();
+      final var subtractiveCommands = RepositoryActor.wrap(() ->
+        sessionFactory.fromTransaction(session ->
+          session.doReturningWork(connection -> computeSubtractiveChanges(metadata, dialect, connection))
+        )
+      ).await();
 
+      for (final var command : subtractiveCommands) {
+        commands.append(command);
+        commands.append(";");
+        commands.append("%s%s".formatted(STATEMENT_BREAKPOINT, System.lineSeparator()));
+      }
+
+      //? Note: By applying all migrations first (at the start of generate()), we ensure the database
+      //? state is correct. This helps SchemaMigrator detect enum type changes more reliably, since it
+      //? compares against the actual current schema state. The separate subtractive pass (above) then
+      //? handles removed tables/columns and nullability changes that Hibernate's migrator ignores.
       if (commands.isEmpty()) {
         return false;
       }
@@ -328,33 +375,332 @@ public class MigrationHelper {
       //? Doing the most.
       console.info("Found %d entities to generate migrations for.".formatted(bindings.size()));
 
-       //? Now you can say you are doing this because you really are.
-       console.info("Generating migration script at " + outputPath.getPath());
+      //? Now you can say you are doing this because you really are.
+      console.info("Generating migration script at " + outputPath.getPath());
 
-       try (final var writer = new FileWriter(file)) {
-         //? Append the earlier comments that instruct the user on the specifics of this
-         //? file format. Include a note about validation pass for enum/subtractive changes.
-         writer.write("""
-           -- This file was generated by comparing the current entity model with the state of the database.
-           -- It includes changes detected through standard Hibernate schema comparison.
-           --
-           -- Each command must be separated by the following comment, which is used as a breakpoint
-           -- to split the commands when applying the migration: end of statement
-           -- If you would like to modify the generated migration, you can edit this file, but be sure
-           -- to keep the statement breakpoint comment between each command, otherwise the
-           -- migration will fail to apply.
-           --
-           -- Note: All previously generated migrations were applied before generating this file to ensure
-           -- the database state was correctly established as a baseline for comparison. This helps detect
-           -- enum alterations, constraint modifications, and subtractive changes more reliably.
-           -- Regards, Tobi of Moovable%s%s
-           """.formatted(System.lineSeparator(), commands.toString()));
-       } catch (Exception e) {
-         throw new RuntimeException("Could not write migration file: " + outputPath, e);
-       }
+      try (final var writer = new FileWriter(file)) {
+        //? Append the earlier comments that instruct the user on the specifics of this
+        //? file format. Include a note about validation pass for enum/subtractive changes.
+        writer.write("""
+          -- This file was generated by comparing the current entity model with the state of the database.
+          -- It includes changes detected through standard Hibernate schema comparison.
+          --
+          -- Each command must be separated by the following comment, which is used as a breakpoint
+          -- to split the commands when applying the migration: end of statement
+          -- If you would like to modify the generated migration, you can edit this file, but be sure
+          -- to keep the statement breakpoint comment between each command, otherwise the
+          -- migration will fail to apply.
+          --
+          -- Note: All previously generated migrations were applied before generating this file to ensure
+          -- the database state was correctly established as a baseline for comparison. This helps detect
+          -- enum alterations, constraint modifications, and subtractive changes more reliably.
+          -- Regards, Tobi of Moovable%s%s
+          """.formatted(System.lineSeparator(), commands.toString()));
+      } catch (Exception e) {
+        throw new RuntimeException("Could not write migration file: " + outputPath, e);
+      }
 
       return true;
     }
+  }
+
+  /**
+   * Computes the "subtractive" side of the schema diff that Hibernate's {@link SchemaMigrator}
+   * never produces: objects that exist in the database but are no longer present in (or differ
+   * from) the entity model.
+   * <p>
+   * This detects:
+   * <ul>
+   *   <li>tables that were removed from the model ({@code DROP TABLE ... CASCADE})</li>
+   *   <li>columns that were removed from the model ({@code ALTER TABLE ... DROP COLUMN ... CASCADE})</li>
+   *   <li>columns whose nullability changed in the model ({@code ALTER TABLE ... ALTER COLUMN ... SET/DROP NOT NULL})</li>
+   *   <li>columns whose default value changed in the model ({@code ALTER TABLE ... ALTER COLUMN ... SET/DROP DEFAULT})</li>
+   *   <li>unique constraints / unique indexes that were removed from the model ({@code ALTER TABLE ... DROP CONSTRAINT} / {@code DROP INDEX})</li>
+   * </ul>
+   * Additive changes (new tables/columns/indexes/constraints and column type/length changes) are
+   * already emitted by the standard {@link SchemaMigrator} and are intentionally left to it to avoid
+   * generating duplicate statements.
+   *
+   * @param metadata  the fully built Hibernate entity model metadata
+   * @param dialect   the active database dialect, used for identifier quoting
+   * @param connection a live JDBC connection to introspect the current database schema
+   * @return the ordered list of subtractive DDL statements to append to the migration
+   */
+  @SuppressWarnings("SqlSourceToSinkFlow")
+  private static List<String> computeSubtractiveChanges(
+    final Metadata metadata,
+    final Dialect dialect,
+    final Connection connection
+  ) throws SQLException {
+    final var statements = new ArrayList<String>();
+
+    //? Build the model view: for every physical table we track the columns it manages, their
+    //? nullability / default, and the set of column-sets the model requires to be unique. A unique
+    //? requirement can be expressed three ways: an explicit @UniqueConstraint (UniqueKey), a unique
+    //? @Index, or a single column marked @Column(unique = true). The last is "anonymous" and Hibernate
+    //? frequently does NOT surface it as a UniqueKey, so we also derive it from the column's isUnique()
+    //? flag. Matching dropped constraints by their *column set* (rather than by the auto-generated
+    //? constraint name) is what keeps still-modeled constraints - such as the uid unique constraint on a
+    //? BaseEntity - from being dropped.
+    final Map<String, Set<String>> managedColumns = new HashMap<>();
+    final Map<String, Map<String, Boolean>> managedNotNull = new HashMap<>();
+    final Map<String, Map<String, String>> managedDefaults = new HashMap<>();
+    final Map<String, Set<Set<String>>> managedUniqueColumnSets = new HashMap<>();
+    for (final var table : metadata.collectTableMappings()) {
+      if (!table.isPhysicalTable()) {
+        continue;
+      }
+
+      final var tableName = table.getName().toLowerCase(Locale.ROOT);
+      final var columns = managedColumns.computeIfAbsent(tableName, k -> new HashSet<>());
+      final var notNull = managedNotNull.computeIfAbsent(tableName, k -> new HashMap<>());
+      final var defaults = managedDefaults.computeIfAbsent(tableName, k -> new HashMap<>());
+      final var uniqueSets = managedUniqueColumnSets.computeIfAbsent(tableName, k -> new HashSet<>());
+
+      for (final var column : table.getColumns()) {
+        final var columnName = column.getName().toLowerCase(Locale.ROOT);
+        columns.add(columnName);
+        notNull.put(columnName, !column.isNullable());
+        defaults.put(columnName, extractModelDefault(column));
+
+        //? Anonymous single-column uniqueness (e.g. @Column(unique = true) on BaseEntity.uid).
+        if (column.isUnique()) {
+          uniqueSets.add(Set.of(columnName));
+        }
+      }
+
+      for (final var uniqueKey : table.getUniqueKeys().values()) {
+        uniqueSets.add(toColumnNameSet(uniqueKey.getColumns()));
+      }
+      for (final var index : table.getIndexes().values()) {
+        if (index.isUnique()) {
+          uniqueSets.add(toColumnNameSet(index.getColumns()));
+        }
+      }
+    }
+
+    //? Resolve the schema we are inspecting. The entity model is deployed against the connection's
+    //? current schema, so we only ever compare against objects living in that schema.
+    var schema = connection.getSchema();
+    if (schema == null || schema.isBlank()) {
+      schema = "public";
+    }
+    final var quotedSchema = schema.replace("'", "''");
+
+    final var dbTables = new HashSet<String>();
+    final Map<String, Set<String>> dbColumns = new HashMap<>();
+    //? Keep the original-case identifiers for emission; comparison is always done on the lowercased keys.
+    final Map<String, String> dbTableNames = new HashMap<>();
+    final Map<String, Map<String, String>> dbColumnNames = new HashMap<>();
+    final Map<String, Map<String, Boolean>> dbNullable = new HashMap<>();
+    final Map<String, Map<String, String>> dbDefaults = new HashMap<>();
+    //? table -> (constraint/index name -> set of column names it covers) for unique objects in the database
+    final Map<String, Map<String, Set<String>>> dbUniqueConstraints = new HashMap<>();
+    final Map<String, Map<String, Set<String>>> dbUniqueIndexes = new HashMap<>();
+
+    try (final Statement statement = connection.createStatement();
+         final ResultSet columns = statement.executeQuery(
+           "select table_name, column_name, is_nullable, column_default from information_schema.columns " +
+             "where table_schema = '" + quotedSchema + "'")) {
+      while (columns.next()) {
+        final var tableNameKey = columns.getString(1).toLowerCase(Locale.ROOT);
+        final var columnNameKey = columns.getString(2).toLowerCase(Locale.ROOT);
+        final var tableName = columns.getString(1);
+        final var columnName = columns.getString(2);
+        final var nullable = "YES".equalsIgnoreCase(columns.getString(3));
+        final var defaultExpr = columns.getString(4);
+        dbTables.add(tableNameKey);
+        dbTableNames.put(tableNameKey, tableName);
+        dbColumns.computeIfAbsent(tableNameKey, k -> new HashSet<>()).add(columnNameKey);
+        dbColumnNames.computeIfAbsent(tableNameKey, k -> new HashMap<>()).put(columnNameKey, columnName);
+        dbNullable.computeIfAbsent(tableNameKey, k -> new HashMap<>()).put(columnNameKey, nullable);
+        dbDefaults.computeIfAbsent(tableNameKey, k -> new HashMap<>()).put(columnNameKey, defaultExpr);
+      }
+    }
+
+    try (final Statement statement = connection.createStatement();
+         final ResultSet constraints = statement.executeQuery(
+           "select tc.table_name, tc.constraint_name, kcu.column_name " +
+             "from information_schema.table_constraints tc " +
+             "join information_schema.key_column_usage kcu " +
+             "  on tc.constraint_name = kcu.constraint_name " +
+             " and tc.table_schema = kcu.table_schema " +
+             " and tc.table_name = kcu.table_name " +
+             "where tc.constraint_type = 'UNIQUE' and tc.table_schema = '" + quotedSchema + "' " +
+             "order by tc.table_name, tc.constraint_name, kcu.ordinal_position")) {
+      while (constraints.next()) {
+        final var tableName = constraints.getString(1).toLowerCase(Locale.ROOT);
+        final var constraintName = constraints.getString(2);
+        final var columnName = constraints.getString(3).toLowerCase(Locale.ROOT);
+        dbUniqueConstraints
+          .computeIfAbsent(tableName, k -> new HashMap<>())
+          .computeIfAbsent(constraintName, k -> new HashSet<>())
+          .add(columnName);
+      }
+    }
+
+    try (final Statement statement = connection.createStatement();
+         final ResultSet indexes = statement.executeQuery(
+           "select i.relname, ci.relname, a.attname " +
+             "from pg_index idx " +
+             "join pg_class i on i.oid = idx.indrelid " +
+             "join pg_class ci on ci.oid = idx.indexrelid " +
+             "join pg_namespace n on n.oid = i.relnamespace " +
+             "join pg_attribute a on a.attrelid = i.oid and a.attnum = any(idx.indkey) " +
+             "where idx.indisunique and not idx.indisprimary and n.nspname = '" + quotedSchema + "' " +
+             "and not exists (" +
+             "  select 1 from information_schema.table_constraints tc " +
+             "  where tc.constraint_type = 'UNIQUE' and tc.table_schema = n.nspname " +
+             "    and tc.table_name = i.relname and tc.constraint_name = ci.relname) " +
+             "order by i.relname, ci.relname, a.attnum")) {
+      while (indexes.next()) {
+        final var tableName = indexes.getString(1).toLowerCase(Locale.ROOT);
+        final var indexName = indexes.getString(2);
+        final var columnName = indexes.getString(3).toLowerCase(Locale.ROOT);
+        dbUniqueIndexes
+          .computeIfAbsent(tableName, k -> new HashMap<>())
+          .computeIfAbsent(indexName, k -> new HashSet<>())
+          .add(columnName);
+      }
+    }
+
+    //? Drop unique constraints / indexes whose column set is no longer required to be unique by the model.
+    //? Matching by column set (not by the auto-generated constraint name) is what prevents still-modeled
+    //? constraints - such as the anonymous unique constraint on BaseEntity.uid - from being dropped. Foreign
+    //? keys are never touched, because this only inspects UNIQUE constraints and unique indexes.
+    for (final var entry : managedColumns.entrySet()) {
+      final var tableName = entry.getKey();
+      final var emitTable = dbTableNames.getOrDefault(tableName, tableName);
+      final var modelUniqueSets = managedUniqueColumnSets.getOrDefault(tableName, Set.of());
+
+      for (final var constraint : dbUniqueConstraints.getOrDefault(tableName, Map.of()).entrySet()) {
+        if (!constraint.getValue().isEmpty() && notCoveredByAny(constraint.getValue(), modelUniqueSets)) {
+          statements.add("alter table %s drop constraint if exists %s".formatted(dialect.quote(emitTable), dialect.quote(constraint.getKey())));
+        }
+      }
+
+      for (final var index : dbUniqueIndexes.getOrDefault(tableName, Map.of()).entrySet()) {
+        if (!index.getValue().isEmpty() && notCoveredByAny(index.getValue(), modelUniqueSets)) {
+          statements.add("drop index if exists %s".formatted(dialect.quote(index.getKey())));
+        }
+      }
+    }
+
+    //? For tables that are still modeled, drop columns that were removed and reconcile nullability
+    //? and default values.
+    for (final var entry : managedColumns.entrySet()) {
+      final var tableName = entry.getKey();
+      final var emitTable = dbTableNames.getOrDefault(tableName, tableName);
+      final var columnNames = dbColumnNames.getOrDefault(tableName, Map.of());
+      if (!dbTables.contains(tableName)) {
+        //? The table itself is missing (it will be created by the additive migrator) or is being
+        //? dropped entirely below, so column-level changes are irrelevant.
+        continue;
+      }
+
+      final var modelColumns = entry.getValue();
+      final var modelNotNull = managedNotNull.get(tableName);
+      final var modelDefaults = managedDefaults.get(tableName);
+      final var existingColumns = dbColumns.getOrDefault(tableName, Set.of());
+      final var existingNullable = dbNullable.getOrDefault(tableName, Map.of());
+      final var existingDefaults = dbDefaults.getOrDefault(tableName, Map.of());
+
+      for (final var dbColumn : existingColumns) {
+        final var emitColumn = columnNames.getOrDefault(dbColumn, dbColumn);
+        if (!modelColumns.contains(dbColumn)) {
+          statements.add("alter table if exists %s drop column %s cascade".formatted(dialect.quote(emitTable), dialect.quote(emitColumn)));
+          continue;
+        }
+
+        //? The column exists in both, so check whether its nullability was changed in the model.
+        final var modelRequired = modelNotNull.get(dbColumn);
+        final var dbColumnNullable = existingNullable.get(dbColumn);
+        if (modelRequired != null && dbColumnNullable != null) {
+          final var dbColumnNotNull = !dbColumnNullable;
+          if (modelRequired != dbColumnNotNull) {
+            final var action = modelRequired ? "set not null" : "drop not null";
+            statements.add("alter table if exists %s alter column %s %s".formatted(dialect.quote(emitTable), dialect.quote(emitColumn), action));
+          }
+        }
+
+        //? The default value may have been added, changed or removed in the model.
+        final var modelDefault = modelDefaults.get(dbColumn);
+        final var dbDefault = existingDefaults.get(dbColumn);
+        final var modelNormalized = normalizeDefault(modelDefault);
+        final var dbNormalized = normalizeDefault(dbDefault);
+        if (modelNormalized == null) {
+          if (dbNormalized != null) {
+            statements.add("alter table if exists %s alter column %s drop default".formatted(dialect.quote(emitTable), dialect.quote(emitColumn)));
+          }
+        } else if (!modelNormalized.equals(dbNormalized)) {
+          statements.add("alter table if exists %s alter column %s set default %s".formatted(dialect.quote(emitTable), dialect.quote(emitColumn), modelDefault));
+        }
+      }
+    }
+
+    //? Tables that exist in the database but are no longer part of the entity model are removed.
+    //? Done last so that dependent objects are dropped alongside the table.
+    for (final var dbTable : dbTables) {
+      if (managedColumns.containsKey(dbTable) || IGNORED_TABLES.contains(dbTable)) {
+        continue;
+      }
+
+      statements.add("drop table if exists %s cascade".formatted(dialect.quote(dbTableNames.getOrDefault(dbTable, dbTable))));
+    }
+
+    return statements;
+  }
+
+  /**
+   * Extracts the model-side default value expression for a column, if any. This is populated when the
+   * entity uses Hibernate's {@code @ColumnDefault} (or equivalent). Note that defaults expressed
+   * purely inside a {@code columnDefinition} fragment are not retrievable from the built metadata and
+   * are therefore not diffed here; the additive migrator has the same limitation.
+   */
+  private static String extractModelDefault(final Column column) {
+    final var explicit = column.getDefaultValue();
+    if (explicit != null && !explicit.isBlank()) {
+      return explicit.trim();
+    }
+
+    return null;
+  }
+
+  /**
+   * Normalizes a default-value expression for comparison, tolerating the trailing type casts that
+   * PostgreSQL appends (e.g. {@code 'x'::text}) and trailing statement delimiters.
+   */
+  private static String normalizeDefault(final String expression) {
+    if (expression == null) {
+      return null;
+    }
+
+    var normalized = expression.trim();
+    if (normalized.endsWith(";")) {
+      normalized = normalized.substring(0, normalized.length() - 1).trim();
+    }
+    normalized = normalized.replaceAll("(?i)\\s*::[a-z_][a-z0-9_$*]*$", "");
+    return normalized.isBlank() ? null : normalized;
+  }
+
+  private static Set<String> toColumnNameSet(final List<Column> columns) {
+    final var names = new HashSet<String>();
+    for (final var column : columns) {
+      names.add(column.getName().toLowerCase(Locale.ROOT));
+    }
+    return names;
+  }
+
+  private static boolean notCoveredByAny(final Set<String> dbColumnSet, final Set<Set<String>> modelUniqueSets) {
+    if (dbColumnSet.isEmpty()) {
+      return true;
+    }
+    for (final var modelSet : modelUniqueSets) {
+      if (modelSet.equals(dbColumnSet)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -468,9 +814,7 @@ public class MigrationHelper {
               console.warn("No migration files found in packaged resources; continuing with zero migration files.");
             }
           }
-        }
-
-        else {
+        } else {
           final var outputDir = new File(uri);
           if (!outputDir.exists()) {
 
