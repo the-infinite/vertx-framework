@@ -13,6 +13,7 @@ import java.util.Objects;
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.utils.DataHelpers;
+import io.github.the_infinite.framework.validation.ValidationException;
 import io.vertx.ext.web.validation.BodyProcessorException;
 import io.vertx.ext.web.validation.ParameterProcessorException;
 import io.vertx.ext.web.validation.RequestPredicateException;
@@ -42,6 +43,7 @@ public class ErrorResult extends Exception {
     return switch (t) {
       case ErrorResult er -> er;
       case PgException e -> new ErrorResult(e.getErrorMessage(), e.getMessage(), 500);
+      case ValidationException e -> new ErrorResult(e.getMessage(), e.getField(), 400);
       case ValueInstantiationException e ->
         new ErrorResult(e.getMessage().split("\\n")[0], e, 400);
       case MismatchedInputException e ->
