@@ -230,6 +230,7 @@ public final class DatabaseFactory {
       props.put("hibernate.hikari.connectionTimeout", 5_000L);
       props.put("jakarta.persistence.schema-generation.database.action", options.schemaGenerateAction);
       props.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
+      props.put("jakarta.persistence.validation.factory", ValidationHelper.getInstance().factory());
 
       //? If this is not a production build.
       if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {

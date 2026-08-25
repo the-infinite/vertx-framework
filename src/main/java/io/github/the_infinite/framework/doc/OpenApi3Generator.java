@@ -901,15 +901,17 @@ public final class OpenApi3Generator {
           if (Modifier.isStatic(field.getModifiers()) || field.isSynthetic()) {
             continue;
           }
-          properties.put(propertyName(field), schemaForType(field.getGenericType(), resolving,
-            currentBindings));
+          properties.put(
+            propertyName(field),
+            schemaForType(field.getGenericType(), resolving, currentBindings)
+          );
           if (field.isAnnotationPresent(IsNullable.class)) {
-            final var notNull =  field.getAnnotation(IsNullable.class);
+            final var nullable = field.getAnnotation(IsNullable.class);
 
-            if (notNull != null && !notNull.value()) {
+            if (nullable != null && !nullable.value()) {
               required.add(propertyName(field));
             }
-          } else if(field.isAnnotationPresent(NotNull.class)) {
+          } else if (field.isAnnotationPresent(NotNull.class)) {
             required.add(propertyName(field));
           }
         }

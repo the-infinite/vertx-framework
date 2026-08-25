@@ -8,8 +8,16 @@ import java.net.URI;
 import java.time.*;
 import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public final class Validator {
 
   @FunctionalInterface
@@ -39,7 +47,7 @@ public final class Validator {
       final var ann = (IsBefore) a;
       final var bound = parseBound(f, ann.time());
       final var actual = toOffsetDateTime(f, v, ann.message());
-      if(actual == null) {
+      if (actual == null) {
         fail(f, ann.message(), "expected a valid OffsetDateTime but was '" + v + "'");
       }
       if (!actual.isBefore(bound)) {
@@ -51,7 +59,7 @@ public final class Validator {
       final var ann = (IsAfter) a;
       final var bound = parseBound(f, ann.time());
       final var actual = toOffsetDateTime(f, v, ann.message());
-      if(actual == null) {
+      if (actual == null) {
         fail(f, ann.message(), "expected a valid OffsetDateTime but was '" + v + "'");
       }
       if (!actual.isAfter(bound)) {
@@ -263,6 +271,13 @@ public final class Validator {
   public static void validate(final Object target) {
     if (target == null) {
       throw new ValidationException("target", "cannot validate a null object");
+    }
+    validate(target, Collections.newSetFromMap(new IdentityHashMap<>()));
+  }
+
+  private static void validate(final Object target, final Set<Object> visited) {
+    if (target == null || !visited.add(target)) {
+      return;
     }
     for (var type = target.getClass(); type != null && type != Object.class; type = type.getSuperclass()) {
       for (final Field field : type.getDeclaredFields()) {
