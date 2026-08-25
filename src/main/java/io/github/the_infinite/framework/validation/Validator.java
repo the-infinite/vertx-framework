@@ -8,16 +8,9 @@ import java.net.URI;
 import java.time.*;
 import java.time.format.DateTimeParseException;
 import java.util.*;
-import java.util.Collections;
-import java.util.IdentityHashMap;
-import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
-import lombok.extern.slf4j.Slf4j;
-
-@Slf4j
 public final class Validator {
 
   @FunctionalInterface
@@ -275,6 +268,7 @@ public final class Validator {
     validate(target, Collections.newSetFromMap(new IdentityHashMap<>()));
   }
 
+  @SuppressWarnings("D")
   private static void validate(final Object target, final Set<Object> visited) {
     if (target == null || !visited.add(target)) {
       return;
@@ -285,14 +279,24 @@ public final class Validator {
           continue;
         }
         final var annotations = field.getDeclaredAnnotations();
-        var hasConstraint = false;
+        var process = false;
         for (final var ann : annotations) {
           if (CONSTRAINTS.containsKey(ann.annotationType()) || ann instanceof IsNullable) {
-            hasConstraint = true;
+            process = true;
             break;
           }
         }
-        if (!hasConstraint) {
+        if (!process) {
+          final var fieldType = field.getType();
+          if (Collection.class.isAssignableFrom(fieldType)
+            || Map.class.isAssignableFrom(fieldType)
+            || Optional.class.isAssignableFrom(fieldType)
+            || fieldType.isArray()
+            || hasValidatableFields(fieldType)) {
+            process = true;
+          }
+        }
+        if (!process) {
           continue;
         }
 
@@ -321,47 +325,47 @@ public final class Validator {
           }
         }
 
-        if (constraints.isEmpty()) {
-          continue;
+        if (!constraints.isEmpty()) {
+          if (orMode) {
+            var passed = false;
+            final var errors = new StringBuilder();
+            for (final var ann : constraints) {
+              try {
+                CONSTRAINTS.get(ann.annotationType()).check(ann, field, value);
+                passed = true;
+                break;
+              } catch (final ValidationException e) {
+                errors.append("; ").append(e.getMessage());
+              }
+            }
+            if (notMode) {
+              if (passed) {
+                fail(field, field.getAnnotation(CombineNot.class).message(), "value satisfied a constraint that must not hold");
+              }
+            } else if (!passed) {
+              fail(field, field.getAnnotation(CombineOr.class).message(),
+                "value did not satisfy any of the " + constraints.size() + " combined constraints:" + errors);
+            }
+          } else if (notMode) {
+            var allPassed = true;
+            for (final var ann : constraints) {
+              try {
+                CONSTRAINTS.get(ann.annotationType()).check(ann, field, value);
+              } catch (final ValidationException e) {
+                allPassed = false;
+              }
+            }
+            if (allPassed) {
+              fail(field, field.getAnnotation(CombineNot.class).message(), "value satisfied constraints that must not hold");
+            }
+          } else {
+            for (final var ann : constraints) {
+              CONSTRAINTS.get(ann.annotationType()).check(ann, field, value);
+            }
+          }
         }
 
-        if (orMode) {
-          var passed = false;
-          final var errors = new StringBuilder();
-          for (final var ann : constraints) {
-            try {
-              CONSTRAINTS.get(ann.annotationType()).check(ann, field, value);
-              passed = true;
-              break;
-            } catch (final ValidationException e) {
-              errors.append("; ").append(e.getMessage());
-            }
-          }
-          if (notMode) {
-            if (passed) {
-              fail(field, field.getAnnotation(CombineNot.class).message(), "value satisfied a constraint that must not hold");
-            }
-          } else if (!passed) {
-            fail(field, field.getAnnotation(CombineOr.class).message(),
-              "value did not satisfy any of the " + constraints.size() + " combined constraints:" + errors);
-          }
-        } else if (notMode) {
-          var allPassed = true;
-          for (final var ann : constraints) {
-            try {
-              CONSTRAINTS.get(ann.annotationType()).check(ann, field, value);
-            } catch (final ValidationException e) {
-              allPassed = false;
-            }
-          }
-          if (allPassed) {
-            fail(field, field.getAnnotation(CombineNot.class).message(), "value satisfied constraints that must not hold");
-          }
-        } else {
-          for (final var ann : constraints) {
-            CONSTRAINTS.get(ann.annotationType()).check(ann, field, value);
-          }
-        }
+        recurseInto(value, visited);
       }
     }
   }
@@ -456,5 +460,85 @@ public final class Validator {
       return Array.getLength(value);
     }
     return -1;
+  }
+
+  private static final Map<Class<?>, Boolean> VALIDATABLE_CACHE = new ConcurrentHashMap<>();
+
+  private static void recurseInto(final Object value, final Set<Object> visited) {
+    switch (value) {
+      case null -> {
+        return;
+      }
+      case Optional<?> optional -> {
+        recurseElement(optional.orElse(null), visited);
+        return;
+      }
+      case Collection<?> collection -> {
+        for (final Object element : collection) {
+          recurseElement(element, visited);
+        }
+        return;
+      }
+      case Map<?, ?> map -> {
+        for (final var entry : map.entrySet()) {
+          recurseElement(entry.getKey(), visited);
+          recurseElement(entry.getValue(), visited);
+        }
+        return;
+      }
+      default -> {
+      }
+    }
+    if (value.getClass().isArray()) {
+      final int length = Array.getLength(value);
+      for (int i = 0; i < length; i++) {
+        recurseElement(Array.get(value, i), visited);
+      }
+      return;
+    }
+    recurseElement(value, visited);
+  }
+
+  private static void recurseElement(final Object element, final Set<Object> visited) {
+    if (element == null || !hasValidatableFields(element.getClass())) {
+      return;
+    }
+    validate(element, visited);
+  }
+
+  private static boolean hasValidatableFields(final Class<?> type) {
+    if (type == null || type.isPrimitive()) {
+      return false;
+    }
+    final var cached = VALIDATABLE_CACHE.get(type);
+    if (cached != null) {
+      return cached;
+    }
+    var result = false;
+    for (var current = type; current != null && current != Object.class; current = current.getSuperclass()) {
+      for (final Field field : current.getDeclaredFields()) {
+        if (field.isSynthetic() || Modifier.isStatic(field.getModifiers())) {
+          continue;
+        }
+        for (final var annotation : field.getDeclaredAnnotations()) {
+          if (CONSTRAINTS.containsKey(annotation.annotationType())
+            || annotation instanceof IsNullable
+            || annotation instanceof CombineOr
+            || annotation instanceof CombineAnd
+            || annotation instanceof CombineNot) {
+            result = true;
+            break;
+          }
+        }
+        if (result) {
+          break;
+        }
+      }
+      if (result) {
+        break;
+      }
+    }
+    VALIDATABLE_CACHE.put(type, result);
+    return result;
   }
 }
