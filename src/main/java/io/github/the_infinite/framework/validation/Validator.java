@@ -42,6 +42,9 @@ public final class Validator {
       final var ann = (IsBefore) a;
       final var bound = parseBound(f, ann.time());
       final var actual = toOffsetDateTime(f, v, ann.message());
+      if(actual == null) {
+        fail(f, ann.message(), "expected a valid OffsetDateTime but was '" + v + "'");
+      }
       if (!actual.isBefore(bound)) {
         fail(f, ann.message(), "expected a date strictly before " + bound + " but was " + actual);
       }
@@ -51,6 +54,9 @@ public final class Validator {
       final var ann = (IsAfter) a;
       final var bound = parseBound(f, ann.time());
       final var actual = toOffsetDateTime(f, v, ann.message());
+      if(actual == null) {
+        fail(f, ann.message(), "expected a valid OffsetDateTime but was '" + v + "'");
+      }
       if (!actual.isAfter(bound)) {
         fail(f, ann.message(), "expected a date strictly after " + bound + " but was " + actual);
       }

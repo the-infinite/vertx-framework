@@ -11,6 +11,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import io.github.the_infinite.framework.middleware.GeneralMiddlewares;
 import io.github.the_infinite.framework.response.ErrorResult;
 import io.github.the_infinite.framework.utils.DataHelpers;
+import io.github.the_infinite.framework.validation.ValidationException;
+import io.github.the_infinite.framework.validation.Validator;
 import io.vertx.core.Context;
 import io.vertx.core.Promise;
 import io.vertx.core.http.HttpHeaders;
@@ -200,7 +202,9 @@ public final class CorrelationContext implements AutoCloseable {
   }
 
 
-  /// Gets the request body of this correlation context. This cannot be set if this
+  /// Gets the request body of this correlation context, deserializes it into the given type and
+  /// validates it using the framework's fail-fast annotation validator. The first validation
+  /// failure raises an `ErrorResult` carrying the offending field. This cannot be set if this
   /// correlation context was not created with a `RoutingContext`.
   public <TBody> TBody body(Class<TBody> type) throws ErrorResult {
     if (routingContext == null) {
@@ -208,41 +212,31 @@ public final class CorrelationContext implements AutoCloseable {
     }
 
     try {
+      final TBody result;
+
       // Multipart test requests encode the actual JSON payload into a single `body` form field.
       if (isMultipartRequest()) {
         final var formBody = getFormBodyPayload();
         if (formBody != null && !formBody.isBlank()) {
-          if (type == String.class) {
-            return type.cast(formBody);
-          }
-          return Json.decodeValue(formBody, type);
+          result = type == String.class ? type.cast(formBody) : Json.decodeValue(formBody, type);
+        } else if (type == String.class) {
+          result = type.cast(routingContext.body().asString());
+        } else {
+          result = routingContext.body().asPojo(type);
         }
+      } else if (type == String.class) {
+        result = type.cast(routingContext.body().asString());
+      } else {
+        result = routingContext.body().asPojo(type);
       }
 
-      // 1. Handle Plain Text directly from the buffer
-      if (type == String.class) {
-        return type.cast(routingContext.body().asString());
+      //? Validate the deserialized DTO with the framework's fail-fast annotation validator.
+      //? Raw String payloads are skipped because they are not structured DTOs.
+      if (type != String.class && result != null) {
+        Validator.validate(result);
       }
 
-      final var params = params();
-
-      if (params != null) {
-        final var validatedBody = params.body();
-
-        if (validatedBody == null) {
-          throw new IllegalArgumentException("Request body is empty or the Content-Type header is missing/unsupported.");
-        }
-
-        if (validatedBody.isJsonObject()) {
-          return validatedBody.getJsonObject().mapTo(type);
-        }
-      }
-
-      final var rawBody = routingContext.body();
-      if (rawBody == null || rawBody.isEmpty()) {
-        throw new IllegalArgumentException("Request body is empty.");
-      }
-      return rawBody.asPojo(type);
+      return result;
     } catch (IllegalArgumentException e) {
       Throwable cause = e;
 
@@ -251,6 +245,8 @@ public final class CorrelationContext implements AutoCloseable {
       }
 
       throw ErrorResult.of(cause);
+    } catch (ValidationException e) {
+      throw ErrorResult.of(e);
     }
   }
 
