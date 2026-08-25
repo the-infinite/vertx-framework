@@ -7,10 +7,7 @@ import java.lang.reflect.Modifier;
 import java.net.URI;
 import java.time.*;
 import java.time.format.DateTimeParseException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Pattern;
 
 public final class Validator {
@@ -300,10 +297,54 @@ public final class Validator {
           continue;
         }
 
+        final var orMode = field.isAnnotationPresent(CombineOr.class);
+        final var notMode = field.isAnnotationPresent(CombineNot.class);
+        final var constraints = new ArrayList<Annotation>();
         for (final var ann : annotations) {
-          final var constraint = CONSTRAINTS.get(ann.annotationType());
-          if (constraint != null) {
-            constraint.check(ann, field, value);
+          if (CONSTRAINTS.containsKey(ann.annotationType())) {
+            constraints.add(ann);
+          }
+        }
+
+        if (constraints.isEmpty()) {
+          continue;
+        }
+
+        if (orMode) {
+          var passed = false;
+          final var errors = new StringBuilder();
+          for (final var ann : constraints) {
+            try {
+              CONSTRAINTS.get(ann.annotationType()).check(ann, field, value);
+              passed = true;
+              break;
+            } catch (final ValidationException e) {
+              errors.append("; ").append(e.getMessage());
+            }
+          }
+          if (notMode) {
+            if (passed) {
+              fail(field, field.getAnnotation(CombineNot.class).message(), "value satisfied a constraint that must not hold");
+            }
+          } else if (!passed) {
+            fail(field, field.getAnnotation(CombineOr.class).message(),
+              "value did not satisfy any of the " + constraints.size() + " combined constraints:" + errors);
+          }
+        } else if (notMode) {
+          var allPassed = true;
+          for (final var ann : constraints) {
+            try {
+              CONSTRAINTS.get(ann.annotationType()).check(ann, field, value);
+            } catch (final ValidationException e) {
+              allPassed = false;
+            }
+          }
+          if (allPassed) {
+            fail(field, field.getAnnotation(CombineNot.class).message(), "value satisfied constraints that must not hold");
+          }
+        } else {
+          for (final var ann : constraints) {
+            CONSTRAINTS.get(ann.annotationType()).check(ann, field, value);
           }
         }
       }
