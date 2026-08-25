@@ -375,7 +375,7 @@ public final class Validator {
   }
 
   private static void fail(final Field field, final String custom, final String defaultMessage) {
-    final var message = (custom != null && !custom.isBlank()) ? custom : defaultMessage;
+    final var message = (custom != null && !custom.isBlank()) ? custom : "%s when processing %s".formatted(defaultMessage, field.getName());
     throw new ValidationException(field.getName(), message);
   }
 
