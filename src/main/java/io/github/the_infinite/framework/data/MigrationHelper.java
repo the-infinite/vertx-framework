@@ -667,8 +667,11 @@ public class MigrationHelper {
   }
 
   /**
-   * Normalizes a default-value expression for comparison, tolerating the trailing type casts that
-   * PostgreSQL appends (e.g. {@code 'x'::text}) and trailing statement delimiters.
+   * Normalizes a default-value expression for comparison. PostgreSQL stores literal defaults with a
+   * trailing type cast (e.g. {@code 'x'::text}, {@code 'x'::character varying},
+   * {@code 'x'::timestamp without time zone}, {@code 'x'::text[]}) and sometimes wraps expression
+   * defaults in parentheses. We strip both so the comparison focuses on the actual value rather than
+   * on representation differences between the model and the live catalog.
    */
   private static String normalizeDefault(final String expression) {
     if (expression == null) {
@@ -679,8 +682,56 @@ public class MigrationHelper {
     if (normalized.endsWith(";")) {
       normalized = normalized.substring(0, normalized.length() - 1).trim();
     }
-    normalized = normalized.replaceAll("(?i)\\s*::[a-z_][a-z0-9_$*]*$", "");
+    //? A cast is always the terminal token. The character class deliberately excludes quotes so we
+    //? never consume into a string literal (e.g. a value that happens to contain "::").
+    normalized = normalized.replaceAll("(?i)\\s*::[\\w\\s*\\[\\],()]+$", "");
+    //? Strip a single layer of balanced surrounding parentheses (PostgreSQL wraps expression defaults,
+    //? e.g. (now() + '1 day'::interval)).
+    if (normalized.startsWith("(") && normalized.endsWith(")") && balancedParentheses(normalized.substring(1, normalized.length() - 1))) {
+      normalized = normalized.substring(1, normalized.length() - 1).trim();
+    }
+    //? Compare case-insensitively for SQL keywords/functions while preserving the exact content of
+    //? string literals.
+    normalized = lowerCaseOutsideQuotes(normalized);
     return normalized.isBlank() ? null : normalized;
+  }
+
+  private static boolean balancedParentheses(final String value) {
+    int depth = 0;
+    boolean inString = false;
+    for (int i = 0; i < value.length(); i++) {
+      final var c = value.charAt(i);
+      if (c == '\'') {
+        inString = !inString;
+      } else if (!inString) {
+        if (c == '(') {
+          depth++;
+        } else if (c == ')') {
+          depth--;
+          if (depth < 0) {
+            return false;
+          }
+        }
+      }
+    }
+    return depth == 0 && !inString;
+  }
+
+  private static String lowerCaseOutsideQuotes(final String value) {
+    final var builder = new StringBuilder(value.length());
+    boolean inString = false;
+    for (int i = 0; i < value.length(); i++) {
+      final var c = value.charAt(i);
+      if (c == '\'') {
+        inString = !inString;
+        builder.append(c);
+      } else if (inString) {
+        builder.append(c);
+      } else {
+        builder.append(Character.toLowerCase(c));
+      }
+    }
+    return builder.toString();
   }
 
   private static Set<String> toColumnNameSet(final List<Column> columns) {
