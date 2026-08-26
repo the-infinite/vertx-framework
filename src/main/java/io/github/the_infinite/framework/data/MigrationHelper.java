@@ -43,16 +43,7 @@ public class MigrationHelper {
    * model. This protects third-party / infrastructure tables that may live in the same schema as
    * the application's managed tables.
    */
-  private static final Set<String> IGNORED_TABLES = Set.of(
-    "__database_migrations",
-    "__database_seeders",
-    "flyway_schema_history",
-    "databasechangelog",
-    "databasechangeloglock",
-    "spatial_ref_sys",
-    "geometry_columns",
-    "geography_columns"
-  );
+  private static final Set<String> IGNORED_TABLES = Set.of("__database_migrations", "__database_seeders", "flyway_schema_history", "databasechangelog", "databasechangeloglock", "spatial_ref_sys", "geometry_columns", "geography_columns");
 
   private static String toJDBCUrl(String url) {
     final var usedUrl = url.trim();
@@ -140,20 +131,16 @@ public class MigrationHelper {
       """
         alter table if exists __database_migrations
         drop constraint if exists UKsrnio194w0ic1jdt8h6ihg781;
-        """,
-      """
+        """, """
         alter table if exists __database_migrations
         add constraint UKsrnio194w0ic1jdt8h6ihg781 unique (uid);
-        """,
-      """
+        """, """
         alter table if exists __database_migrations
         drop constraint if exists UKllr0ja6npx3lubk3kqyk3t3oe;
-        """,
-      """
+        """, """
         alter table if exists __database_migrations
         add constraint UKllr0ja6npx3lubk3kqyk3t3oe unique (migration_name);
-        """
-    );
+        """);
 
     try {
       return RepositoryActor.wrap(() -> {
@@ -230,17 +217,13 @@ public class MigrationHelper {
       throw new RuntimeException("Cannot generate migrations without first applying existing migrations", e);
     }
 
-    final Map<String, Object> dbConfig = Map.of(
-      "jakarta.persistence.jdbc.url", toJDBCUrl(env.getPgUrl()),
-      "hibernate.dialect", org.hibernate.dialect.PostgreSQLDialect.class.getName(),
+    final Map<String, Object> dbConfig = Map.of("jakarta.persistence.jdbc.url", toJDBCUrl(env.getPgUrl()), "hibernate.dialect", org.hibernate.dialect.PostgreSQLDialect.class.getName(),
       //? Use RECREATE_QUIETLY so the additive migrator only *adds* missing unique constraints and
       //? never drops/recreates existing ones. This is critical for anonymous unique constraints
       //? (e.g. @Column(unique = true) on BaseEntity.uid) which Hibernate names implicitly and which
       //? the default DROP_RECREATE_QUIETLY strategy would otherwise drop on every single generation.
       //? Removed unique constraints are handled separately by the subtractive diff pass below.
-      org.hibernate.cfg.SchemaToolingSettings.UNIQUE_CONSTRAINT_SCHEMA_UPDATE_STRATEGY,
-      org.hibernate.tool.schema.UniqueConstraintSchemaUpdateStrategy.RECREATE_QUIETLY
-    );
+      org.hibernate.cfg.SchemaToolingSettings.UNIQUE_CONSTRAINT_SCHEMA_UPDATE_STRATEGY, org.hibernate.tool.schema.UniqueConstraintSchemaUpdateStrategy.RECREATE_QUIETLY);
     registryBuilder.applySettings(dbConfig);
 
     try (final var serviceRegistry = registryBuilder.build()) {
@@ -319,11 +302,7 @@ public class MigrationHelper {
       //? database already reflects every object that is still part of the model, so anything left
       //? over in the database but absent from the model is genuinely removed and safe to drop.
       final var dialect = metadata.getDatabase().getJdbcEnvironment().getDialect();
-      final var subtractiveCommands = RepositoryActor.wrap(() ->
-        sessionFactory.fromTransaction(session ->
-          session.doReturningWork(connection -> computeSubtractiveChanges(metadata, dialect, connection))
-        )
-      ).await();
+      final var subtractiveCommands = RepositoryActor.wrap(() -> sessionFactory.fromTransaction(session -> session.doReturningWork(connection -> computeSubtractiveChanges(metadata, dialect, connection)))).await();
 
       for (final var command : subtractiveCommands) {
         commands.append(command);
@@ -359,13 +338,12 @@ public class MigrationHelper {
       if (Arrays.stream(Objects.requireNonNull(file.getParentFile().list())).anyMatch(migrationFile -> {
         final var parts = migrationFile.split("-", 3);
         final var fileParts = file.getName().split("-", 3);
-        final var checksum = parts[1];
-        final var currentChecksum = fileParts[1];
-
         if (parts.length < 3) {
           return false;
         }
 
+        final var checksum = parts[1];
+        final var currentChecksum = fileParts[1];
         return Objects.equals(parts[1], fileParts[1]);
       })) {
         console.info("A migration file with the same changes already exists, skipping generation.");
@@ -427,11 +405,7 @@ public class MigrationHelper {
    * @return the ordered list of subtractive DDL statements to append to the migration
    */
   @SuppressWarnings("SqlSourceToSinkFlow")
-  private static List<String> computeSubtractiveChanges(
-    final Metadata metadata,
-    final Dialect dialect,
-    final Connection connection
-  ) throws SQLException {
+  private static List<String> computeSubtractiveChanges(final Metadata metadata, final Dialect dialect, final Connection connection) throws SQLException {
     final var statements = new ArrayList<String>();
 
     //? Build the model view: for every physical table we track the columns it manages, their
@@ -498,10 +472,7 @@ public class MigrationHelper {
     final Map<String, Map<String, Set<String>>> dbUniqueConstraints = new HashMap<>();
     final Map<String, Map<String, Set<String>>> dbUniqueIndexes = new HashMap<>();
 
-    try (final Statement statement = connection.createStatement();
-         final ResultSet columns = statement.executeQuery(
-           "select table_name, column_name, is_nullable, column_default from information_schema.columns " +
-             "where table_schema = '" + quotedSchema + "'")) {
+    try (final Statement statement = connection.createStatement(); final ResultSet columns = statement.executeQuery("select table_name, column_name, is_nullable, column_default from information_schema.columns " + "where table_schema = '" + quotedSchema + "'")) {
       while (columns.next()) {
         final var tableNameKey = columns.getString(1).toLowerCase(Locale.ROOT);
         final var columnNameKey = columns.getString(2).toLowerCase(Locale.ROOT);
@@ -518,49 +489,21 @@ public class MigrationHelper {
       }
     }
 
-    try (final Statement statement = connection.createStatement();
-         final ResultSet constraints = statement.executeQuery(
-           "select tc.table_name, tc.constraint_name, kcu.column_name " +
-             "from information_schema.table_constraints tc " +
-             "join information_schema.key_column_usage kcu " +
-             "  on tc.constraint_name = kcu.constraint_name " +
-             " and tc.table_schema = kcu.table_schema " +
-             " and tc.table_name = kcu.table_name " +
-             "where tc.constraint_type = 'UNIQUE' and tc.table_schema = '" + quotedSchema + "' " +
-             "order by tc.table_name, tc.constraint_name, kcu.ordinal_position")) {
+    try (final Statement statement = connection.createStatement(); final ResultSet constraints = statement.executeQuery("select tc.table_name, tc.constraint_name, kcu.column_name " + "from information_schema.table_constraints tc " + "join information_schema.key_column_usage kcu " + "  on tc.constraint_name = kcu.constraint_name " + " and tc.table_schema = kcu.table_schema " + " and tc.table_name = kcu.table_name " + "where tc.constraint_type = 'UNIQUE' and tc.table_schema = '" + quotedSchema + "' " + "order by tc.table_name, tc.constraint_name, kcu.ordinal_position")) {
       while (constraints.next()) {
         final var tableName = constraints.getString(1).toLowerCase(Locale.ROOT);
         final var constraintName = constraints.getString(2);
         final var columnName = constraints.getString(3).toLowerCase(Locale.ROOT);
-        dbUniqueConstraints
-          .computeIfAbsent(tableName, k -> new HashMap<>())
-          .computeIfAbsent(constraintName, k -> new HashSet<>())
-          .add(columnName);
+        dbUniqueConstraints.computeIfAbsent(tableName, k -> new HashMap<>()).computeIfAbsent(constraintName, k -> new HashSet<>()).add(columnName);
       }
     }
 
-    try (final Statement statement = connection.createStatement();
-         final ResultSet indexes = statement.executeQuery(
-           "select i.relname, ci.relname, a.attname " +
-             "from pg_index idx " +
-             "join pg_class i on i.oid = idx.indrelid " +
-             "join pg_class ci on ci.oid = idx.indexrelid " +
-             "join pg_namespace n on n.oid = i.relnamespace " +
-             "join pg_attribute a on a.attrelid = i.oid and a.attnum = any(idx.indkey) " +
-             "where idx.indisunique and not idx.indisprimary and n.nspname = '" + quotedSchema + "' " +
-             "and not exists (" +
-             "  select 1 from information_schema.table_constraints tc " +
-             "  where tc.constraint_type = 'UNIQUE' and tc.table_schema = n.nspname " +
-             "    and tc.table_name = i.relname and tc.constraint_name = ci.relname) " +
-             "order by i.relname, ci.relname, a.attnum")) {
+    try (final Statement statement = connection.createStatement(); final ResultSet indexes = statement.executeQuery("select i.relname, ci.relname, a.attname " + "from pg_index idx " + "join pg_class i on i.oid = idx.indrelid " + "join pg_class ci on ci.oid = idx.indexrelid " + "join pg_namespace n on n.oid = i.relnamespace " + "join pg_attribute a on a.attrelid = i.oid and a.attnum = any(idx.indkey) " + "where idx.indisunique and not idx.indisprimary and n.nspname = '" + quotedSchema + "' " + "and not exists (" + "  select 1 from information_schema.table_constraints tc " + "  where tc.constraint_type = 'UNIQUE' and tc.table_schema = n.nspname " + "    and tc.table_name = i.relname and tc.constraint_name = ci.relname) " + "order by i.relname, ci.relname, a.attnum")) {
       while (indexes.next()) {
         final var tableName = indexes.getString(1).toLowerCase(Locale.ROOT);
         final var indexName = indexes.getString(2);
         final var columnName = indexes.getString(3).toLowerCase(Locale.ROOT);
-        dbUniqueIndexes
-          .computeIfAbsent(tableName, k -> new HashMap<>())
-          .computeIfAbsent(indexName, k -> new HashSet<>())
-          .add(columnName);
+        dbUniqueIndexes.computeIfAbsent(tableName, k -> new HashMap<>()).computeIfAbsent(indexName, k -> new HashSet<>()).add(columnName);
       }
     }
 
@@ -701,12 +644,12 @@ public class MigrationHelper {
     boolean inString = false;
     for (int i = 0; i < value.length(); i++) {
       final var c = value.charAt(i);
-      if (c == '\'') {
+      if (c == '\'' ) {
         inString = !inString;
       } else if (!inString) {
-        if (c == '(') {
+        if (c == '(' ) {
           depth++;
-        } else if (c == ')') {
+        } else if (c == ')' ) {
           depth--;
           if (depth < 0) {
             return false;
@@ -722,7 +665,7 @@ public class MigrationHelper {
     boolean inString = false;
     for (int i = 0; i < value.length(); i++) {
       final var c = value.charAt(i);
-      if (c == '\'') {
+      if (c == '\'' ) {
         inString = !inString;
         builder.append(c);
       } else if (inString) {
@@ -784,10 +727,7 @@ public class MigrationHelper {
 
           console.info("Applying migration " + file.getName());
 
-          final var statements = Arrays.stream(sql.split(STATEMENT_BREAKPOINT))
-            .map(cmd -> "%s;".formatted(cmd).trim())
-            .filter(cmd -> !cmd.equals(";"))
-            .toList();
+          final var statements = Arrays.stream(sql.split(STATEMENT_BREAKPOINT)).map(cmd -> "%s;".formatted(cmd).trim()).filter(cmd -> !cmd.equals(";")).toList();
 
           for (final var command : statements) {
             session.createNativeQuery(command).executeUpdate();
@@ -797,12 +737,7 @@ public class MigrationHelper {
           final var crc = new CRC32();
           crc.update(sql.getBytes());
 
-          session.insert(
-            entry.setMigrationName(file.getName())
-              .setChecksum(crc.getValue())
-              .setData(DataHelpers.toBase64(sql))
-              .setUid(UUID.randomUUID())
-          );
+          session.insert(entry.setMigrationName(file.getName()).setChecksum(crc.getValue()).setData(DataHelpers.toBase64(sql)).setUid(UUID.randomUUID()));
 
           console.exec("Applied " + file.getName());
         }
@@ -842,11 +777,7 @@ public class MigrationHelper {
                   throw new IOException("Failed to create temporary migration directory: " + tempDir.getAbsolutePath());
                 }
 
-                final var pathsList = walkStream
-                  .filter(Files::isRegularFile)
-                  .filter(path -> path.getFileName().toString().endsWith(".sql"))
-                  .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                  .toList();
+                final var pathsList = walkStream.filter(Files::isRegularFile).filter(path -> path.getFileName().toString().endsWith(".sql")).sorted(Comparator.comparing(path -> path.getFileName().toString())).toList();
 
                 for (final var path : pathsList) {
                   final var fileName = path.getFileName().toString();
@@ -884,9 +815,7 @@ public class MigrationHelper {
           // Get the current sorted files from the local folder
           final var localFiles = outputDir.listFiles();
           if (localFiles != null) {
-            migrationFiles.addAll(Arrays.stream(localFiles)
-              .sorted(Comparator.comparing(File::getName))
-              .toList());
+            migrationFiles.addAll(Arrays.stream(localFiles).sorted(Comparator.comparing(File::getName)).toList());
           }
         }
       }
@@ -896,24 +825,12 @@ public class MigrationHelper {
         // If this does not exist, then we can just run the migrations without checking for applied ones, since there are none.
         if (!exists) {
           console.info("Migrations table does not exist, applying all migrations...");
-          createMigrationsTable(vertx, sessionFactory)
-            .onFailure(promise::fail)
-            .onSuccess(v -> executeMigrations(console, sessionFactory, migrationFiles, List.of())
-              .onSuccess(ignored -> promise.succeed())
-              .onFailure(promise::fail));
+          createMigrationsTable(vertx, sessionFactory).onFailure(promise::fail).onSuccess(v -> executeMigrations(console, sessionFactory, migrationFiles, List.of()).onSuccess(ignored -> promise.succeed()).onFailure(promise::fail));
           return;
         }
 
         // Since it exists, we need to check which migrations have been applied and only run the ones that have not been applied.
-        migrationsRepo.getMany(
-            null,
-            new RepositoryOptions<MigrationEntry>(CorrelationContext.from(vertx.getOrCreateContext())).setLimit(3000),
-            null
-          )
-          .onFailure(promise::fail)
-          .onSuccess(migrations -> executeMigrations(console, sessionFactory, migrationFiles, migrations)
-            .onSuccess(ignored -> promise.succeed())
-            .onFailure(promise::fail));
+        migrationsRepo.getMany(null, new RepositoryOptions<MigrationEntry>(CorrelationContext.from(vertx.getOrCreateContext())).setLimit(3000), null).onFailure(promise::fail).onSuccess(migrations -> executeMigrations(console, sessionFactory, migrationFiles, migrations).onSuccess(ignored -> promise.succeed()).onFailure(promise::fail));
       });
 
       return promise.future();
