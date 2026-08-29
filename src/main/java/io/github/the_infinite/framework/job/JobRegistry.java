@@ -189,7 +189,7 @@ public final class JobRegistry {
         timedJobs.add(job);
       }
 
-      //? Skip the first out of step run for deferred jobs.
+      //? Skip the first-out-of-step run for deferred jobs.
       if (job.deferred) continue;
       promises.add(runJob(job));
     }
@@ -251,10 +251,8 @@ public final class JobRegistry {
           final var minuteMatch = calendar.get(Calendar.MINUTE) == schedule.minute();
           final var secondMatch = calendar.get(Calendar.SECOND) >= schedule.second();
 
-          //? If this is redundant....
+          //? If this is redundant...
           if (lastRun != null && DateUtils.isSameDay(lastRun, now)) continue;
-
-          ///? If this is okay...
           if (hourMatch && minuteMatch && secondMatch) {
             runJob(job);
           }

@@ -10,6 +10,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
+import io.github.the_infinite.framework.doc.DocumentableDTO;
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.utils.DataHelpers;
@@ -21,7 +22,7 @@ import io.vertx.pgclient.PgException;
 import lombok.Getter;
 
 @SuppressWarnings("unused")
-public class ErrorResult extends Exception {
+public class ErrorResult extends Exception implements DocumentableDTO {
   protected final String message;
 
   @Getter
@@ -89,6 +90,11 @@ public class ErrorResult extends Exception {
 
   public TypedServiceResult<Object> toServiceResult() {
     return new ServiceResult<>("error", message, data, code);
+  }
+
+  @Override
+  public String toExample() {
+    return toServiceResult().serialize();
   }
 
   public record ExceptionDto(
