@@ -369,14 +369,19 @@ public final class PersistentRepository<TModel extends BaseEntity, TModule exten
    * @see #getById(long, LockModeType, RepositoryOptions, Session)
    */
   public Future<Optional<TModel>> getById(long id, @NotNull RepositoryOptions<TModel> options) {
-    return this.getById(id, LockModeType.OPTIMISTIC, options, null);
+    return this.getById(id, LockModeType.NONE, options, null);
   }
 
 
   public Future<Optional<TModel>> getById(long id,
                                           @NotNull RepositoryOptions<TModel> options,
                                           @Nullable Session transaction) {
-    return this.getById(id, LockModeType.OPTIMISTIC, options, transaction);
+    return this.getById(
+      id,
+      transaction != null ? LockModeType.OPTIMISTIC : LockModeType.NONE,
+      options,
+      transaction
+    );
   }
 
   /**
