@@ -28,9 +28,13 @@ public final class HikariConnectionProvider implements ConnectionProvider, Confi
   private static final String JDBC_PASSWORD = "jakarta.persistence.jdbc.password";
   private static final String MAXIMUM_POOL_SIZE = "hibernate.hikari.maximumPoolSize";
   private static final String CONNECTION_TIMEOUT = "hibernate.hikari.connectionTimeout";
+  private static final String INITIALIZATION_FAIL_TIMEOUT = "hibernate.hikari.initializationFailTimeout";
 
   private static final int DEFAULT_MAXIMUM_POOL_SIZE = 10;
   private static final long DEFAULT_CONNECTION_TIMEOUT_MS = 5_000L;
+  //? Fail fast at bootstrap so the framework's connection retry / "die on exhaustion" policy can take over,
+  //? instead of the pool silently starting in a broken state.
+  private static final long DEFAULT_INITIALIZATION_FAIL_TIMEOUT_MS = 5_000L;
 
   private HikariDataSource dataSource;
 
@@ -43,6 +47,7 @@ public final class HikariConnectionProvider implements ConnectionProvider, Confi
     config.setPassword((String) configurationValues.get(JDBC_PASSWORD));
     config.setMaximumPoolSize(intSetting(configurationValues));
     config.setConnectionTimeout(longSetting(configurationValues));
+    config.setInitializationFailTimeout(initializationFailTimeout(configurationValues));
     config.setValidationTimeout(2_000L);
     config.setIdleTimeout(600_000L);
     config.setMaxLifetime(1_800_000L);
@@ -92,5 +97,10 @@ public final class HikariConnectionProvider implements ConnectionProvider, Confi
   private static long longSetting(Map<String, Object> values) {
     final var raw = values.get(HikariConnectionProvider.CONNECTION_TIMEOUT);
     return raw == null ? HikariConnectionProvider.DEFAULT_CONNECTION_TIMEOUT_MS : Long.parseLong(String.valueOf(raw));
+  }
+
+  private static long initializationFailTimeout(Map<String, Object> values) {
+    final var raw = values.get(HikariConnectionProvider.INITIALIZATION_FAIL_TIMEOUT);
+    return raw == null ? HikariConnectionProvider.DEFAULT_INITIALIZATION_FAIL_TIMEOUT_MS : Long.parseLong(String.valueOf(raw));
   }
 }

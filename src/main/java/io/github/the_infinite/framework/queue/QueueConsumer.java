@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 import io.github.the_infinite.framework.data.DatabaseFactory;
@@ -22,6 +23,7 @@ import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.rabbitmq.RabbitMQClient;
 import io.vertx.rabbitmq.RabbitMQConsumer;
+import io.vertx.rabbitmq.RabbitMQMessage;
 import lombok.Getter;
 
 @SuppressWarnings({"unused", "CallToPrintStackTrace"})
@@ -128,10 +130,20 @@ public class QueueConsumer<T, ResultType> {
         }
         return Future.succeededFuture();
       })
+      .compose(v -> queueManagement.setPrefetch(options.prefetchCount))
       .compose(v -> queueManagement.createConsumer(queueName, consumerTag))
       .onFailure(promise::fail)
       .onSuccess(rabbitConsumer -> {
         consumer = rabbitConsumer;
+
+        //? Surface transport-level failures (channel/connection drops) instead of silently swallowing them.
+        consumer.exceptionHandler(error -> logger.error(context, LogEvent.create(
+          "Consumer transport error", getClass().getName(), Map.of(
+            "queueName", queueName,
+            "consumerTag", consumerTag,
+            "error", error.getMessage(),
+            "stackTrace", Arrays.stream(error.getStackTrace()).map(StackTraceElement::toString)
+          ))));
 
         this.logger.exec(context, LogEvent.create("A new consumer has been connected", getClass().getName(), Map.of(
           "queueName", queueName,
@@ -149,132 +161,206 @@ public class QueueConsumer<T, ResultType> {
         }
 
         //? Handle messages here.
-        consumer.handler(message -> vertx.executeBlocking(() -> {
-          try {
-            final var envelope = message.envelope();
-            final var jsonObject = message.body().toJsonObject();
-            final var body = jsonObject.encode();
-            final var messageData = deserializer.apply(body);
-            final var messageType = messageData.getClass();
-            final var timeStart = logger.time(context, LogEvent.create("Message handled by consumer", getClass().getName(), Map.of(
-              "queue", queueName,
-              "consumerTag", consumerTag,
-              "messageType", messageType.getName(),
-              "startedAt", System.currentTimeMillis(),
-              "messageId", envelope.getDeliveryTag()
-            )));
-
-            //? Handle the message
-            handler.handle(
-              messageData,
-              envelope.isRedeliver(),
-              multiple -> queueManagement.acknowledgeMessage(envelope.getDeliveryTag(), multiple),
-              requeue -> queueManagement.rejectMessage(envelope.getDeliveryTag(), false, requeue)
-            ).onComplete(handleResult -> {
-              //? Add this to our list of good results...
-              if (handleResult.succeeded()) {
-                successResults.put(envelope.getDeliveryTag(), handleResult.result().getData());
-                logger.exec(context, LogEvent.create("Message processed successfully", getClass().getSimpleName(), Map.of(
-                  "queue", queueName,
-                  "consumerTag", consumerTag,
-                  "messageType", messageType.getName(),
-                  "messageId", envelope.getDeliveryTag(),
-                  "timestamp", System.currentTimeMillis(),
-                  "input", jsonObject.getMap(),
-                  "result", handleResult.result().serialize()
-                )));
-              }
-              //? This is okay then.
-              else {
-                if (AppEnvironment.getInstance().getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
-                  handleResult.cause().printStackTrace();
-                }
-                failErrors.put(envelope.getDeliveryTag(), handleResult.cause());
-                logger.error(context, LogEvent.create("Failed to process message", getClass().getSimpleName(), Map.of(
-                  "queue", queueName,
-                  "input", jsonObject.getMap(),
-                  "consumerTag", consumerTag,
-                  "messageType", messageType.getName(),
-                  "messageId", envelope.getDeliveryTag(),
-                  "timestamp", System.currentTimeMillis(),
-                  "error", handleResult.cause().getMessage(),
-                  "stackTrace", Arrays.stream(handleResult.cause().getStackTrace()).map(StackTraceElement::toString)
-                )));
-
-                //? Handle retries and DLQ.
-                final var headers = message.properties().getHeaders();
-                int retryCount = 0;
-                if (headers != null && headers.containsKey("x-retry-count")) {
-                  retryCount = Integer.parseInt(headers.get("x-retry-count").toString());
-                }
-
-                if (this.options.useRetryQueue && retryCount < this.options.maxRetries) {
-                  final Map<String, Object> newHeaders = (headers == null) ? new HashMap<>() : new HashMap<>(headers);
-                  newHeaders.put("x-retry-count", retryCount + 1);
-
-                  final var originalProps = message.properties();
-                  final var props = new AMQP.BasicProperties(
-                    originalProps.getContentType(),
-                    originalProps.getContentEncoding(),
-                    newHeaders,
-                    originalProps.getDeliveryMode(),
-                    originalProps.getPriority(),
-                    originalProps.getCorrelationId(),
-                    originalProps.getReplyTo(),
-                    originalProps.getExpiration(),
-                    originalProps.getMessageId(),
-                    originalProps.getTimestamp(),
-                    originalProps.getType(),
-                    originalProps.getUserId(),
-                    originalProps.getAppId(),
-                    null
-                  );
-
-                  queueManagement.publishToQueue(queueName + ".retry", body, props)
-                    .onSuccess(v -> queueManagement.acknowledgeMessage(envelope.getDeliveryTag(), false))
-                    .onFailure(v -> queueManagement.rejectMessage(envelope.getDeliveryTag(), false, true));
-                } else if (this.options.useDeadLetterQueue) {
-                  queueManagement.publishToQueue(queueName + ".dlq", body, (AMQP.BasicProperties) message.properties())
-                    .onSuccess(v -> queueManagement.acknowledgeMessage(envelope.getDeliveryTag(), false))
-                    .onFailure(v -> queueManagement.rejectMessage(envelope.getDeliveryTag(), false, true));
-                } else {
-                  queueManagement.rejectMessage(envelope.getDeliveryTag(), false, false);
-                }
-              }
-
-              //? End this one.
-              timeStart.end();
-            });
-          } catch (Exception ex) {
-            if (AppEnvironment.getInstance().getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
-              ex.printStackTrace();
-            }
-            logger.error(context, LogEvent.create("Failed to handle message", getClass().getSimpleName(), Map.of(
-              "queue", queueName,
-              "consumerTag", consumerTag,
-              "error", ex.getMessage(),
-              "stackTrace", Arrays.stream(ex.getStackTrace()).map(StackTraceElement::toString)
-            )));
-
-            if (this.options.useDeadLetterQueue) {
-              queueManagement.publishToQueue(queueName + ".dlq", message.body().toString(), (AMQP.BasicProperties) message.properties())
-                .onSuccess(v -> queueManagement.acknowledgeMessage(message.envelope().getDeliveryTag(), false))
-                .onFailure(v -> queueManagement.rejectMessage(message.envelope().getDeliveryTag(), false, true));
-            } else {
-              queueManagement.rejectMessage(message.envelope().getDeliveryTag(), false, false).onComplete(ar -> {
-              });
-            }
-          }
-
-          //? Return empty.
-          return null;
-        }));
+        consumer.handler(this::handleMessage);
 
         //? This is done.
         promise.succeed();
       });
 
     return promise.future();
+  }
+
+  private void handleMessage(RabbitMQMessage message) {
+    final long deliveryTag = message.envelope().getDeliveryTag();
+    final var redelivered = message.envelope().isRedeliver();
+
+    //? Exactly-once acknowledgement: whichever code path resolves the message first wins, the rest are ignored.
+    final var settled = new AtomicBoolean(false);
+    final long[] watchdog = {-1};
+
+    final Runnable cancelWatchdog = () -> {
+      if (watchdog[0] >= 0) {
+        vertx.cancelTimer(watchdog[0]);
+        watchdog[0] = -1;
+      }
+    };
+
+    //? Optional safety net: if a handler never completes, recycle the message instead of pinning a prefetch slot.
+    if (options.processingTimeoutMs > 0) {
+      watchdog[0] = vertx.setTimer(options.processingTimeoutMs, tid -> {
+        if (settled.compareAndSet(false, true)) {
+          logger.error(context, LogEvent.create("Message processing timed out", getClass().getSimpleName(), Map.of(
+            "queueName", queueName,
+            "consumerTag", consumerTag,
+            "messageId", deliveryTag,
+            "timeoutMs", options.processingTimeoutMs
+          )));
+          //? Requeue so a (possibly stuck) in-flight attempt is superseded; consumers must be idempotent.
+          queueManagement.rejectMessage(deliveryTag, false, true);
+        }
+      });
+    }
+
+    final Function<Boolean, Future<Void>> ack = multiple -> {
+      cancelWatchdog.run();
+      if (settled.compareAndSet(false, true)) {
+        return queueManagement.acknowledgeMessage(deliveryTag, Boolean.TRUE.equals(multiple))
+          .onFailure(err -> logger.error(context, LogEvent.create("Failed to ack message", getClass().getSimpleName(), Map.of(
+            "queueName", queueName, "messageId", deliveryTag, "error", err.getMessage()
+          ))));
+      }
+      return Future.succeededFuture();
+    };
+
+    final Function<Boolean, Future<Void>> nack = requeue -> {
+      cancelWatchdog.run();
+      if (settled.compareAndSet(false, true)) {
+        //? An explicit manual nack with requeue=true short-circuits the retry/DLQ routing.
+        if (Boolean.TRUE.equals(requeue)) {
+          return queueManagement.rejectMessage(deliveryTag, false, true);
+        }
+        return routeAndSettle(deliveryTag, message, retryCountOf(message));
+      }
+      return Future.succeededFuture();
+    };
+
+    try {
+      final var jsonObject = message.body().toJsonObject();
+      final var messageData = deserializer.apply(jsonObject.encode());
+
+      final var messageType = messageData.getClass();
+      final var timeStart = logger.time(context, LogEvent.create("Message handled by consumer", getClass().getName(), Map.of(
+        "queue", queueName,
+        "consumerTag", consumerTag,
+        "messageType", messageType.getName(),
+        "startedAt", System.currentTimeMillis(),
+        "messageId", deliveryTag
+      )));
+
+      handler.handle(messageData, redelivered, ack, nack).onComplete(handleResult -> {
+        cancelWatchdog.run();
+        try {
+          if (handleResult.succeeded()) {
+            successResults.put(deliveryTag, handleResult.result().getData());
+            logger.exec(context, LogEvent.create("Message processed successfully", getClass().getSimpleName(), Map.of(
+              "queue", queueName,
+              "consumerTag", consumerTag,
+              "messageType", messageType.getName(),
+              "messageId", deliveryTag,
+              "timestamp", System.currentTimeMillis(),
+              "input", jsonObject.getMap(),
+              "result", handleResult.result().serialize()
+            )));
+            ack.apply(false);
+          } else {
+            failErrors.put(deliveryTag, handleResult.cause());
+            logger.error(context, LogEvent.create("Failed to process message", getClass().getSimpleName(), Map.of(
+              "queue", queueName,
+              "input", jsonObject.getMap(),
+              "consumerTag", consumerTag,
+              "messageType", messageType.getName(),
+              "messageId", deliveryTag,
+              "timestamp", System.currentTimeMillis(),
+              "error", handleResult.cause().getMessage(),
+              "stackTrace", Arrays.stream(handleResult.cause().getStackTrace()).map(StackTraceElement::toString)
+            )));
+
+            if (AppEnvironment.getInstance().getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
+              handleResult.cause().printStackTrace();
+            }
+
+            nack.apply(false);
+          }
+        } finally {
+          timeStart.end();
+        }
+      });
+    } catch (Exception ex) {
+      cancelWatchdog.run();
+      logger.error(context, LogEvent.create("Failed to handle message", getClass().getSimpleName(), Map.of(
+        "queue", queueName,
+        "consumerTag", consumerTag,
+        "error", ex.getMessage(),
+        "stackTrace", Arrays.stream(ex.getStackTrace()).map(StackTraceElement::toString)
+      )));
+
+      if (AppEnvironment.getInstance().getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
+        ex.printStackTrace();
+      }
+
+      //? A poison message (unparseable payload) should not be endlessly redelivered; route it to the DLQ or drop it.
+      if (settled.compareAndSet(false, true)) {
+        routeAndSettle(deliveryTag, message, retryCountOf(message)).onFailure(v ->
+          queueManagement.rejectMessage(deliveryTag, false, false));
+      }
+    }
+  }
+
+  /**
+   * Routes a failed message to the retry queue (incrementing the retry counter), the dead-letter queue, or
+   * rejects it outright. In every branch the original delivery is acknowledged exactly once, so the broker does
+   * not keep an orphaned unacked message.
+   */
+  private Future<Void> routeAndSettle(long deliveryTag, RabbitMQMessage message, int retryCount) {
+    final var headers = message.properties() == null ? null : message.properties().getHeaders();
+
+    if (options.useRetryQueue && retryCount < options.maxRetries) {
+      final Map<String, Object> newHeaders = new HashMap<>();
+      if (headers != null) {
+        newHeaders.putAll(headers);
+      }
+      newHeaders.put("x-retry-count", retryCount + 1);
+
+      return queueManagement.publishToQueue(queueName + ".retry", message.body().toString(), buildRepublishProperties(message, newHeaders))
+        .compose(v -> queueManagement.acknowledgeMessage(deliveryTag, false))
+        .recover(err -> queueManagement.rejectMessage(deliveryTag, false, false));
+    }
+
+    if (options.useDeadLetterQueue) {
+      final Map<String, Object> dlqHeaders = new HashMap<>();
+      if (headers != null) {
+        dlqHeaders.putAll(headers);
+      }
+      return queueManagement.publishToQueue(queueName + ".dlq", message.body().toString(), buildRepublishProperties(message, dlqHeaders))
+        .compose(v -> queueManagement.acknowledgeMessage(deliveryTag, false))
+        .recover(err -> queueManagement.rejectMessage(deliveryTag, false, false));
+    }
+
+    //? No retry/DLQ configured: reject without requeue so the message is dropped rather than poison the queue.
+    return queueManagement.rejectMessage(deliveryTag, false, false);
+  }
+
+  private int retryCountOf(RabbitMQMessage message) {
+    final var props = message.properties();
+    if (props == null) {
+      return 0;
+    }
+    final var headers = props.getHeaders();
+    if (headers == null || !headers.containsKey("x-retry-count")) {
+      return 0;
+    }
+    try {
+      return Integer.parseInt(headers.get("x-retry-count").toString());
+    } catch (NumberFormatException e) {
+      return 0;
+    }
+  }
+
+  private AMQP.BasicProperties buildRepublishProperties(RabbitMQMessage message, Map<String, Object> headers) {
+    final var builder = new AMQP.BasicProperties.Builder().headers(headers).deliveryMode(2);
+    final var original = message.properties();
+    if (original != null) {
+      if (original.getContentType() != null) builder.contentType(original.getContentType());
+      if (original.getContentEncoding() != null) builder.contentEncoding(original.getContentEncoding());
+      if (original.getCorrelationId() != null) builder.correlationId(original.getCorrelationId());
+      if (original.getReplyTo() != null) builder.replyTo(original.getReplyTo());
+      if (original.getExpiration() != null) builder.expiration(original.getExpiration());
+      if (original.getMessageId() != null) builder.messageId(original.getMessageId());
+      if (original.getType() != null) builder.type(original.getType());
+      if (original.getAppId() != null) builder.appId(original.getAppId());
+      if (original.getPriority() != null) builder.priority(original.getPriority());
+    }
+    return builder.build();
   }
 
   public final Future<Void> stop() {

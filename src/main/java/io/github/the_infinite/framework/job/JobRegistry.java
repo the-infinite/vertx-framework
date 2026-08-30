@@ -2,13 +2,15 @@ package io.github.the_infinite.framework.job;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.github.the_infinite.framework.logging.TimeEvent;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
 import io.github.the_infinite.framework.logging.monitor.LogEvent;
 import io.github.the_infinite.framework.response.ErrorResult;
-import io.github.the_infinite.framework.utils.DateUtils;
+import io.github.the_infinite.framework.response.ServiceResult;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
@@ -16,12 +18,25 @@ import io.vertx.core.json.JsonObject;
 
 /**
  * Registry responsible for tracking and scheduling {@link ServiceJob} instances for a single {@link Vertx} runtime.
+ * <p>
+ * Improvements over the naive scheduler:
+ * <ul>
+ *   <li>Per-job overlap guard: a job is never run concurrently with itself. If a tick fires while the previous run
+ *       is still in flight, the new run is skipped (rather than piling up behind a blocking/slow handler).</li>
+ *   <li>Logging failures are decoupled from run success: a transient failure to emit the run's log does not mark the
+ *       job run itself as failed.</li>
+ *   <li>Graceful shutdown drains in-flight runs before invoking {@code stopGracefully} on each job.</li>
+ *   <li>Daily (EXACT) jobs are keyed on the calendar day, not an arbitrary 24h window, so a late-night run does not
+ *       suppress the next day's execution.</li>
+ * </ul>
  */
 @SuppressWarnings("unused")
 public final class JobRegistry {
   private final static Map<Vertx, JobRegistry> instances = new ConcurrentHashMap<>();
   private final Map<String, ServiceJob<?>> jobs = new ConcurrentHashMap<>();
   private final Map<String, TimeEvent> times = new ConcurrentHashMap<>();
+  private final Map<String, AtomicBoolean> running = new ConcurrentHashMap<>();
+  private final Queue<Future<?>> inFlight = new ConcurrentLinkedQueue<>();
   private final ArrayList<Long> timers;
   private final CorrelationContext context;
   private final Vertx vertx;
@@ -32,6 +47,14 @@ public final class JobRegistry {
     this.timers = new ArrayList<>();
     this.context = CorrelationContext.from(vertx.getOrCreateContext());
     this.shutdownHookRegistered = false;
+  }
+
+  /**
+   * Resolved lazily because the console is only guaranteed to exist once the configuration registrant has been
+   * set up, which happens after the registry singleton is first requested.
+   */
+  private ConsoleLogger console() {
+    return ConsoleLogger.getInstance(vertx);
   }
 
   /**
@@ -58,7 +81,6 @@ public final class JobRegistry {
       throw new IllegalStateException("No start time recorded for '%s'".formatted(id));
     }
 
-
     //? See it to the end.
     final var time = times.get(id);
     time.end();
@@ -81,41 +103,51 @@ public final class JobRegistry {
   }
 
   private <T> Future<Void> runJob(ServiceJob<T> job) {
-    final var id = getRunId(job);
-    final var promise = Promise.<Void>promise();
+    final var runningFlag = running.computeIfAbsent(job.getClass().getName(), k -> new AtomicBoolean(false));
 
-    try {
-      markStart(job);
-      job.run().andThen((runResult) -> {
-        if (!runResult.succeeded()) {
-          handleFailure(job, runResult.cause());
-          promise.fail(runResult.cause());
-          return;
-        }
-
-        final var result = runResult.result();
-        job.saveMetrics(result.getData());
-
-        job.logger.exec(context, LogEvent.create(result.getMessage(), id, Map.of("data", result.getData()))).andThen(loggingResult -> {
-          if (!loggingResult.succeeded()) {
-            handleFailure(job, loggingResult.cause());
-            promise.fail(loggingResult.cause());
-            return;
-          }
-
-          //? Save this.
-          this.markEnd(job);
-          times.remove(id);
-          job.markSuccess();
-          promise.succeed();
-        });
-      });
-    } catch (Throwable e) {
-      handleFailure(job, e);
-      promise.fail(e);
+    //? Never run the same job on top of itself. A slow/blocking run is skipped until the next tick.
+    if (!runningFlag.compareAndSet(false, true)) {
+      console().warn("Skipping overlapping run of job '%s': a previous run is still in progress.".formatted(job.getClass().getSimpleName()));
+      return Future.succeededFuture();
     }
 
-    return promise.future();
+    final var id = getRunId(job);
+    markStart(job);
+
+    Future<ServiceResult<T>> runFuture;
+    try {
+      runFuture = job.run();
+    } catch (Throwable t) {
+      runFuture = Future.failedFuture(t);
+    }
+    if (runFuture == null) {
+      runFuture = Future.failedFuture(new NullPointerException("job.run() returned a null Future"));
+    }
+
+    final var tracked = runFuture.andThen(runResult -> {
+      try {
+        if (runResult.failed()) {
+          handleFailure(job, runResult.cause());
+        } else {
+          final var result = runResult.result();
+          job.saveMetrics(result.getData());
+          markEnd(job);
+          times.remove(id);
+          job.markSuccess();
+
+          //? Emit the run log fire-and-forget. A logging failure must never be reported as a job failure.
+          job.logger.exec(context, LogEvent.create(result.getMessage(), id, Map.of("data", result.getData())))
+            .onFailure(logErr -> console().error("Failed to emit log for job run '%s': %s".formatted(id, logErr.getMessage())));
+        }
+      } finally {
+        runningFlag.set(false);
+      }
+    });
+
+    inFlight.add(tracked);
+    tracked.onComplete(v -> inFlight.remove(tracked));
+
+    return tracked.mapEmpty();
   }
 
   /**
@@ -139,29 +171,44 @@ public final class JobRegistry {
 
   /**
    * Stops all registered jobs and cancels active timers for this registry.
+   * <p>
+   * In-flight job runs are awaited before {@code stopGracefully} is invoked on each job, so a shutdown does not
+   * abandon work that is mid-execution.
    */
   public Future<Void> stopJobs() {
     final var promise = Promise.<Void>promise();
-    final var stopFutures = new ArrayList<Future<?>>();
 
     for (final var timer : timers) {
       vertx.cancelTimer(timer);
     }
+    timers.clear();
 
-    for (final var job : jobs.values()) {
-      stopFutures.add(job.stopGracefully().andThen(result -> {
-        if (result.succeeded()) {
-          this.markEndIfStarted(job);
+    final var draining = new ArrayList<>(inFlight);
+    final Future<Void> drainFuture = draining.isEmpty()
+      ? Future.succeededFuture()
+      : Future.join(draining).mapEmpty();
+
+    drainFuture.onComplete(drainResult -> {
+      if (drainResult.failed()) {
+        console().warn("Some in-flight jobs failed while draining during shutdown.");
+      }
+
+      final var stopFutures = new ArrayList<Future<?>>();
+      for (final var job : jobs.values()) {
+        try {
+          stopFutures.add(job.stopGracefully());
+        } catch (Throwable t) {
+          console().error("Failed to stop job '%s' gracefully: %s".formatted(job.getClass().getSimpleName(), t.getMessage()));
         }
-      }));
-    }
+      }
 
-    if (stopFutures.isEmpty()) {
-      promise.succeed();
-      return promise.future();
-    }
+      if (stopFutures.isEmpty()) {
+        promise.succeed();
+        return;
+      }
 
-    Future.all(stopFutures).onSuccess(v -> promise.succeed()).onFailure(promise::fail);
+      Future.join(stopFutures).onSuccess(v -> promise.succeed()).onFailure(promise::fail);
+    });
 
     return promise.future();
   }
@@ -173,12 +220,9 @@ public final class JobRegistry {
     final var promise = context.<Void>promise();
     final var promises = new ArrayList<Future<?>>();
     final var timedJobs = new ArrayList<ServiceJob<?>>();
-    final var console = ConsoleLogger.getInstance(vertx);
-    final var allJobs = jobs.values();
-    Future<?> advanceFuture = Future.succeededFuture();
 
     //? For each job we have here...
-    for (final var job : allJobs) {
+    for (final var job : jobs.values()) {
       //? First, if this is a periodic job, schedule it to run after a given timeline...
       if (job.myType == ServiceJob.JobType.PERIODIC) {
         timers.add(vertx.setPeriodic(job.period, timer -> runJob(job)));
@@ -198,18 +242,17 @@ public final class JobRegistry {
     if (!shutdownHookRegistered) {
       synchronized (this) {
         if (!shutdownHookRegistered) {
-          Runtime.getRuntime().addShutdownHook(new Thread(() -> stopJobs().andThen(stopResult -> {
+          Runtime.getRuntime().addShutdownHook(new Thread(() -> stopJobs().onComplete(stopResult -> {
             if (stopResult.failed()) {
               final var error = ErrorResult.of(stopResult.cause());
-              console.error("Failed to stop jobs gracefully: %s".formatted(error.getMessage()));
-              return;
+              console().error("Failed to stop jobs gracefully: %s".formatted(error.getMessage()));
             }
 
             try {
               System.exit(0);
             } catch (Throwable e) {
               final var error = ErrorResult.of(e);
-              console.error("Failed to exit gracefully: %s".formatted(error.getMessage()));
+              console().error("Failed to exit gracefully: %s".formatted(error.getMessage()));
             }
           })));
           shutdownHookRegistered = true;
@@ -218,41 +261,35 @@ public final class JobRegistry {
     }
 
     //? Run them the first time if they are all defined here for us.
-    if (!promises.isEmpty()) {
-      advanceFuture = Future.all(promises);
-    }
+    final var advanceFuture = promises.isEmpty() ? Future.succeededFuture() : Future.all(promises);
 
-    //? If this is a job with an intervally
-    advanceFuture.andThen(initialRunResult -> {
+    //? Schedule the time-of-day jobs. This happens regardless of whether the initial (non-deferred) runs succeeded,
+    //? because a transient failure on startup must not prevent the recurring schedule from being installed.
+    advanceFuture.onComplete(initialRunResult -> {
       if (initialRunResult.failed()) {
         final var error = ErrorResult.of(initialRunResult.cause());
-        console.error("Failed to start jobs: %s".formatted(error.getMessage()));
-        return;
+        console().error("One or more initial job runs failed: %s".formatted(error.getMessage()));
       }
 
-      //? Now, run all scheduled jobs.
       final var calendar = Calendar.getInstance();
       timers.add(vertx.setPeriodic(1000, timer -> {
+        final var now = new Date();
         for (final var job : timedJobs) {
-          if (job.schedule == null) {
-            console.error("Invalid schedule job found as a scheduled job seems to have no schedule configured");
+          final var schedule = job.getSchedule();
+          if (schedule == null) {
+            console().error("Scheduled job '%s' has no schedule configured".formatted(job.getClass().getSimpleName()));
             continue;
           }
 
-          final var now = new Date();
-          final var schedule = job.schedule;
-          final var lastRun = job.getLastRun();
-
-          //? Update the reference time.
           calendar.setTime(now);
-
-          //? Match the times
           final var hourMatch = schedule.hour() == calendar.get(Calendar.HOUR_OF_DAY);
-          final var minuteMatch = calendar.get(Calendar.MINUTE) == schedule.minute();
+          final var minuteMatch = schedule.minute() == calendar.get(Calendar.MINUTE);
           final var secondMatch = calendar.get(Calendar.SECOND) >= schedule.second();
 
-          //? If this is redundant...
-          if (lastRun != null && DateUtils.isSameDay(lastRun, now)) continue;
+          //? Once per calendar day.
+          final var lastRun = job.getLastRun();
+          if (lastRun != null && isSameCalendarDay(lastRun, now)) continue;
+
           if (hourMatch && minuteMatch && secondMatch) {
             runJob(job);
           }
@@ -263,8 +300,21 @@ public final class JobRegistry {
       promise.succeed();
     });
 
-
     //? Return a future that denotes this promise.
     return promise.future();
+  }
+
+  /**
+   * True when {@code first} and {@code second} fall on the same calendar day (year/month/day). Unlike a naive
+   * 24-hour window, this correctly handles jobs that last ran late on the previous day.
+   */
+  private static boolean isSameCalendarDay(Date first, Date second) {
+    final var a = Calendar.getInstance();
+    final var b = Calendar.getInstance();
+    a.setTime(first);
+    b.setTime(second);
+    return a.get(Calendar.YEAR) == b.get(Calendar.YEAR)
+      && a.get(Calendar.MONTH) == b.get(Calendar.MONTH)
+      && a.get(Calendar.DAY_OF_MONTH) == b.get(Calendar.DAY_OF_MONTH);
   }
 }

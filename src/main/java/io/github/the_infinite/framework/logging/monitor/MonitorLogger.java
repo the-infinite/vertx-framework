@@ -335,6 +335,8 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
     public boolean useRetryQueue;
     public boolean useDeadLetterQueue;
     public OnFailed onFailed;
+    public int prefetchCount;
+    public long processingTimeoutMs;
 
     public Options() {
       this.batchSize = 50;
@@ -346,6 +348,8 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
       this.useDeadLetterQueue = false;
       this.maxRetries = 5;
       this.onFailed = null;
+      this.prefetchCount = 16;
+      this.processingTimeoutMs = 0;
     }
 
     private Options(Options other) {
@@ -358,6 +362,8 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
       this.useRetryQueue = other.useRetryQueue;
       this.useDeadLetterQueue = other.useDeadLetterQueue;
       this.onFailed = other.onFailed;
+      this.prefetchCount = other.prefetchCount;
+      this.processingTimeoutMs = other.processingTimeoutMs;
     }
 
     public Options copy() {
@@ -379,6 +385,14 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
 
       if (maxRetries < 0) {
         throw new IllegalArgumentException("maxRetries cannot be negative");
+      }
+
+      if (prefetchCount < 0) {
+        throw new IllegalArgumentException("prefetchCount cannot be negative");
+      }
+
+      if (processingTimeoutMs < 0) {
+        throw new IllegalArgumentException("processingTimeoutMs cannot be negative");
       }
 
       return this;
@@ -462,6 +476,24 @@ public class MonitorLogger implements ICorrelatedLogger<LogEvent<Object>> {
      */
     public Options setOnFailed(@Nullable OnFailed handler) {
       this.onFailed = handler;
+      return this;
+    }
+
+    /**
+     * Maximum number of unacknowledged messages a single consumer channel will pull at once.
+     * A bounded value protects the consumer from being overwhelmed and keeps redelivery flowing.
+     */
+    public Options setPrefetchCount(int prefetchCount) {
+      this.prefetchCount = prefetchCount;
+      return this;
+    }
+
+    /**
+     * If greater than zero, a message whose handler has not completed within this many milliseconds is
+     * negatively acknowledged (requeued), so the slot is recycled. Consumers must be idempotent for this to be safe.
+     */
+    public Options setProcessingTimeout(long processingTimeoutMs) {
+      this.processingTimeoutMs = processingTimeoutMs;
       return this;
     }
 

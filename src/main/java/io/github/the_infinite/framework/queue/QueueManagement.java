@@ -13,6 +13,7 @@ import io.vertx.rabbitmq.RabbitMQConsumer;
  * Utility class for managing RabbitMQ queues, exchanges, bindings, and message operations.
  * Provides convenience methods without exposing the underlying RabbitMQClient directly.
  */
+@SuppressWarnings("unused")
 public class QueueManagement {
   private final RabbitMQClient client;
 
@@ -244,6 +245,20 @@ public class QueueManagement {
       options.setConsumerTag(consumerTag);
     }
     return client.basicConsumer(queueName, options);
+  }
+
+  /**
+   * Limits how many unacknowledged messages may be in flight on this channel at once. Bounding this prevents a
+   * slow or stuck consumer from pulling the entire queue into memory and from blocking redelivery of healthy
+   * messages.
+   * @param prefetchCount the maximum number of unacknowledged deliveries (0 restores the unlimited default)
+   * @return a Future that completes when the QoS has been applied
+   */
+  public Future<Void> setPrefetch(int prefetchCount) {
+    if (prefetchCount <= 0) {
+      return Future.succeededFuture();
+    }
+    return client.basicQos(prefetchCount).mapEmpty();
   }
 
   /**

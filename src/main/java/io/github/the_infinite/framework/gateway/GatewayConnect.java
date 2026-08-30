@@ -5,14 +5,13 @@ import com.milestone.basilisk.vertx.BasiliskClient;
 import java.util.List;
 
 import io.github.the_infinite.framework.env.AppEnvironment;
+import io.github.the_infinite.framework.retry.RetryStrategy;
 import io.vertx.core.Future;
-import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import lombok.Getter;
 
 public final class GatewayConnect {
-  private static final int MAX_CONNECT_ATTEMPTS = 2;
-  private static final long RETRY_DELAY_MS = 5000;
+  private static final int MAX_CONNECT_ATTEMPTS = 5;
 
   @Getter
   private static GatewayConnect instance;
@@ -31,6 +30,9 @@ public final class GatewayConnect {
     if (instance != null) {
       return Future.failedFuture(new IllegalStateException("Already initialized"));
     }
+    if(mountPaths.isEmpty()) {
+      return Future.succeededFuture();
+    }
 
     final var env = AppEnvironment.getInstance();
     final var host = env.getRequired("BASILISK_HOST");
@@ -46,7 +48,7 @@ public final class GatewayConnect {
       scheme, host, port, weight, authType, token
     );
 
-    return connectWithRetry(vertx, config, 1).compose(client -> {
+    return connectWithRetry(vertx, config).compose(client -> {
       instance = new GatewayConnect(client);
       return Future.succeededFuture();
     });
@@ -54,19 +56,12 @@ public final class GatewayConnect {
 
   private static Future<BasiliskClient> connectWithRetry(
     Vertx vertx,
-    BasiliskClient.BasiliskClientConfig config,
-    int attempt
+    BasiliskClient.BasiliskClientConfig config
   ) {
-    return BasiliskClient.connect(vertx, config).recover(err -> {
-      if (attempt >= MAX_CONNECT_ATTEMPTS) {
-        return Future.failedFuture(err);
-      }
-
-      final Promise<BasiliskClient> retryPromise = Promise.promise();
-      vertx.setTimer(RETRY_DELAY_MS, ignored ->
-        connectWithRetry(vertx, config, attempt + 1).onComplete(retryPromise)
-      );
-      return retryPromise.future();
-    });
+    return RetryStrategy.create(vertx)
+      .withBaseDelay(1_000L)
+      .withMaxDelay(30_000L)
+      .withMaxAttempts(MAX_CONNECT_ATTEMPTS)
+      .withExponentialBackoff(() -> BasiliskClient.connect(vertx, config));
   }
 }

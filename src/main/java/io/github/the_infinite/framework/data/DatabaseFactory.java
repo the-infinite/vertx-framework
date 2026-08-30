@@ -20,10 +20,11 @@ import io.github.the_infinite.framework.data.cache.RedisRegionFactory;
 import io.github.the_infinite.framework.data.seed.SeederEntry;
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
-import io.github.the_infinite.framework.response.ErrorResult;
+import io.github.the_infinite.framework.retry.RetryStrategy;
 import io.github.the_infinite.framework.utils.DataHelpers;
 import io.reactiverse.elasticsearch.client.RestHighLevelClient;
 import io.vertx.core.Future;
+import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.mongo.MongoClient;
@@ -43,6 +44,12 @@ public final class DatabaseFactory {
   private static final Map<Vertx, MongoClient> mongoClients = new ConcurrentHashMap<>();
   private static final int DEFAULT_ES_PORT = 9200;
 
+  //* Connection bootstrap retry policy. Core infrastructure (databases, brokers, caches) must come up;
+  //* we retry with exponential back-off and jitter and then terminate the process if it never does.
+  private static final long CONNECT_BASE_DELAY_MS = 1_000L;
+  private static final long CONNECT_MAX_DELAY_MS = 30_000L;
+  private static final int CONNECT_MAX_ATTEMPTS = 12;
+
   public static Future<SessionFactory> createPostgresDatabase(Vertx vertx) {
     return createPostgresDatabase(vertx, defaultOptions);
   }
@@ -58,19 +65,10 @@ public final class DatabaseFactory {
     final var console = ConsoleLogger.getInstance(vertx);
     final var client = (RedisClient) Redis.createClient(vertx, new RedisOptions().setConnectionString(env.getRedisUrl()));
 
-    //? Connect to Redis first.
-    client.connect().andThen(connectResult -> {
-      if (connectResult.failed()) {
-        final var error = ErrorResult.of(connectResult.cause());
-        console.error("Could not connect to Redis: %s%n".formatted(error.getMessage()));
-        return;
-      }
+    //? Connect to Redis with retry + exponential back-off + jitter. Die if we never connect.
+    connectWithRetry(vertx, "Redis", () -> client.connect().mapEmpty());
 
-      final var connection = connectResult.result();
-      connection.close();
-      console.exec("Connected to Redis Successfully\n");
-    }).await();
-
+    console.exec("Connected to Redis Successfully\n");
     redisClients.put(vertx, client);
     return client;
   }
@@ -89,17 +87,10 @@ public final class DatabaseFactory {
       .put("useObjectId", true);
     final var client = MongoClient.createShared(vertx, config);
 
-    //? Fetch collections to validate connectivity.
-    client.getCollections().onComplete(getResult -> {
-      if (getResult.failed()) {
-        final var error = ErrorResult.of(getResult.cause());
-        console.error("Could not connect to MongoDB: %s%n".formatted(error.getMessage()));
-        return;
-      }
+    //? Fetch collections to validate connectivity with retry + exponential back-off + jitter.
+    connectWithRetry(vertx, "MongoDB", () -> client.getCollections().mapEmpty());
 
-      console.exec("Connected to MongoDB Successfully\n");
-    });
-
+    console.exec("Connected to MongoDB Successfully\n");
     mongoClients.put(vertx, client);
     return client;
   }
@@ -115,24 +106,20 @@ public final class DatabaseFactory {
     final var console = ConsoleLogger.getInstance(vertx);
     final var config = new RabbitMQOptions()
       .setAutomaticRecoveryEnabled(true)
-      .setReconnectInterval(5000)
+      .setReconnectInterval(5_000)
       .setReconnectAttempts(10);
     config.setUri(env.getRabbitMqUrl());
     config.setVirtualHost(env.getRabbitMqVhost());
     final var client = RabbitMQClient.create(vertx, config);
 
-    //? Connect to RabbitMQ first.
-    client.start().andThen(startResult -> {
-      if (startResult.failed()) {
-        final var error = ErrorResult.of(startResult.cause());
-        console.error("Could not connect to RabbitMQ: %s%n".formatted(error.getMessage()));
-        return;
-      }
+    //? Connect to RabbitMQ with retry + exponential back-off + jitter. Die if we never connect.
+    connectWithRetry(vertx, "RabbitMQ", () -> client.start().compose(v ->
+      client.isConnected()
+        ? Future.succeededFuture()
+        : Future.failedFuture(new IllegalStateException("RabbitMQ client reported not connected after start()"))
+    ));
 
-      console.exec("Connected to RabbitMQ Successfully\n");
-    }).await();
-
-    //? This is fine.
+    console.exec("Connected to RabbitMQ Successfully\n");
     queueClients.put(vertx, client);
     return client;
   }
@@ -174,25 +161,28 @@ public final class DatabaseFactory {
       RestClient.builder(new HttpHost(parsed.host(), parsed.port(), parsed.scheme()))
     );
 
-    //? Fetch indices to validate connectivity.
-    try {
-      client.indices().getAsync(new GetIndexRequest().humanReadable(true), RequestOptions.DEFAULT, getResult -> {
-        if (getResult.failed()) {
-          final var error = ErrorResult.of(getResult.cause());
-          console.error("Could not connect to Elasticsearch: %s%n".formatted(error.getMessage()));
-          return;
-        }
+    //? Fetch indices to validate connectivity with retry + exponential back-off + jitter.
+    connectWithRetry(vertx, "Elasticsearch", () -> probeElastic(client));
 
-        console.exec("Connected to Elasticsearch Successfully\n");
-      });
-    } catch (Exception ex) {
-      final var error = ErrorResult.of(ex);
-      console.error("Could not connect to Elasticsearch: %s%n".formatted(error.getMessage()));
-    }
-
-    //? This is fine.
+    console.exec("Connected to Elasticsearch Successfully\n");
     elasticClients.put(vertx, client);
     return client;
+  }
+
+  private static Future<Void> probeElastic(RestHighLevelClient client) {
+    final var promise = Promise.<Void>promise();
+    try {
+      client.indices().getAsync(new GetIndexRequest().humanReadable(true), RequestOptions.DEFAULT, result -> {
+        if (result.failed()) {
+          promise.fail(result.cause());
+        } else {
+          promise.complete();
+        }
+      });
+    } catch (Exception ex) {
+      promise.fail(ex);
+    }
+    return promise.future();
   }
 
   public static Future<SessionFactory> createPostgresDatabase(@NotNull Vertx vertx, @NotNull PostgresOptions options) {
@@ -210,7 +200,7 @@ public final class DatabaseFactory {
     final var databaseConnectTimer = console.time("Connecting to the PG database for '%s'".formatted(options.unitName));
 
     //? Then we log this.
-    return vertx.executeBlocking(() -> {
+    final var connectAction = (java.util.function.Supplier<Future<SessionFactory>>) () -> vertx.executeBlocking(() -> {
       //? First, build the basics.
       final var props = new HashMap<String, Object>();
       props.put("jakarta.persistence.jdbc.url", toJDBCUrl(options.url));
@@ -255,26 +245,82 @@ public final class DatabaseFactory {
         .applySettings(props)
         .build();
 
-      //? 2. Add Entities Programmatically using MetadataSources
-      final var metadataSources = new MetadataSources(registry);
-      final var annotatedClasses = DataHelpers.findSubclasses(BaseEntity.class);
-      annotatedClasses.removeIf(cls -> cls == BaseAuditableEntity.class || cls == BaseEntity.class);
-      annotatedClasses.forEach(metadataSources::addAnnotatedClass);
+      try {
+        //? 2. Add Entities Programmatically using MetadataSources
+        final var metadataSources = new MetadataSources(registry);
+        final var annotatedClasses = DataHelpers.findSubclasses(BaseEntity.class);
+        annotatedClasses.removeIf(cls -> cls == BaseAuditableEntity.class || cls == BaseEntity.class);
+        annotatedClasses.forEach(metadataSources::addAnnotatedClass);
 
-      //? 3. Add support for managing migrations at this point.
-      metadataSources.addAnnotatedClass(MigrationEntry.class);
-      metadataSources.addAnnotatedClass(SeederEntry.class);
+        //? 3. Add support for managing migrations at this point.
+        metadataSources.addAnnotatedClass(MigrationEntry.class);
+        metadataSources.addAnnotatedClass(SeederEntry.class);
 
-      //? 4. Build Metadata and SessionFactory
-      final var sessionFactory = metadataSources.buildMetadata().buildSessionFactory();
-      PersistentRepository.initialize(SeederEntry.Modules.SYSTEM, SeederEntry.class, sessionFactory);
+        //? 4. Build Metadata and SessionFactory (Hikari is configured to fail fast if it cannot connect).
+        final var sessionFactory = metadataSources.buildMetadata().buildSessionFactory();
+        PersistentRepository.initialize(SeederEntry.Modules.SYSTEM, SeederEntry.class, sessionFactory);
 
-      //? Put this in.
-      sessionFactories.put(options.unitName, sessionFactory);
+        //? Put this in.
+        sessionFactories.put(options.unitName, sessionFactory);
 
-      //? Then return to the created session factory.
-      return sessionFactory;
-    }).onSuccess(sessionFactory -> console.exec("Database client is ready\n"));
+        //? Then return to the created session factory.
+        return sessionFactory;
+      } catch (Throwable t) {
+        //? Avoid leaking the registry (and its connection pool) on a failed bootstrap.
+        try {
+          StandardServiceRegistryBuilder.destroy(registry);
+        } catch (Throwable ignored) {
+        }
+        throw t;
+      }
+    });
+
+    return RetryStrategy.create(vertx)
+      .withBaseDelay(CONNECT_BASE_DELAY_MS)
+      .withMaxDelay(CONNECT_MAX_DELAY_MS)
+      .withMaxAttempts(CONNECT_MAX_ATTEMPTS)
+      .onExhausted(cause -> fatal(vertx, "PostgreSQL", cause))
+      .withExponentialBackoff(connectAction)
+      .onSuccess(sessionFactory -> console.exec("Database client is ready\n"))
+      .onSuccess(v -> databaseConnectTimer.end());
+  }
+
+  /**
+   * Blocks the calling thread (bootstrap context) while retrying {@code probe} with exponential back-off and
+   * jitter. If every attempt is exhausted the process is terminated via {@link #fatal(Vertx, String, Throwable)}.
+   */
+  private static void connectWithRetry(Vertx vertx, String component, java.util.function.Supplier<Future<Void>> probe) {
+    final var future = RetryStrategy.create(vertx)
+      .withBaseDelay(CONNECT_BASE_DELAY_MS)
+      .withMaxDelay(CONNECT_MAX_DELAY_MS)
+      .withMaxAttempts(CONNECT_MAX_ATTEMPTS)
+      .onExhausted(cause -> fatal(vertx, component, cause))
+      .withExponentialBackoff(probe);
+
+    try {
+      future.toCompletionStage().toCompletableFuture().join();
+    } catch (Exception ignored) {
+      //? fatal() has already terminated the JVM; this is purely defensive.
+    }
+  }
+
+  /**
+   * Terminal failure handler for core infrastructure. Logs the root cause and shuts the process down. We would
+   * rather fail fast and loudly than run in a degraded state without a database/broker.
+   */
+  private static void fatal(Vertx vertx, String component, Throwable cause) {
+    try {
+      final var console = ConsoleLogger.getInstance(vertx);
+      console.error("FATAL: Could not establish a connection to %s after exhausting all retry attempts. The application cannot run without it.".formatted(component));
+    } catch (Throwable ignored) {
+    }
+
+    try {
+      vertx.close().toCompletionStage().toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+    } catch (Throwable ignored) {
+    }
+
+    System.exit(1);
   }
 
   private static String toJDBCUrl(String url) {
