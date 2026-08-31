@@ -223,7 +223,7 @@ public final class DatabaseFactory {
       props.put("jakarta.persistence.validation.factory", ValidationHelper.getInstance().factory());
 
       //? If this is not a production build.
-      if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
+      if (env.shouldLogSql()) {
         props.put("hibernate.show_sql", true);
         props.put("hibernate.format_sql", true);
         props.put("hibernate.highlight_sql", true);

@@ -26,6 +26,7 @@ public class AppEnvironment {
   private String name;
   private String versionCode;
   private int buildNumber;
+  private boolean logSql;
 
   //? For instances count
   private int serverCount;
@@ -111,6 +112,7 @@ public class AppEnvironment {
     var setupMode = instance.get("SETUP_MODE", "PRODUCTION");
     var serverPort = instance.getRequired("SERVER_PORT");
     var urlStr = instance.getRequired("SERVICE_URL");
+    var logSql = instance.get("LOG_SQL", "false");
 
     //? Second, for the database and service config settings.
     var pgUrl = instance.getRequired("POSTGRESQL_URL");
@@ -135,6 +137,12 @@ public class AppEnvironment {
     //? Now, use these values as is necessary.
     instance.name = serverName;
     instance.versionCode = versionCode;
+
+    try {
+      instance.logSql = Boolean.parseBoolean(logSql);
+    } catch (NumberFormatException e) {
+      throw new IllegalStateException("Invalid LOG_SQL value: " + logSql);
+    }
 
     try {
       instance.buildNumber = Integer.parseUnsignedInt(buildNumberStr);
@@ -207,6 +215,10 @@ public class AppEnvironment {
     } catch (NumberFormatException e) {
       throw new IllegalStateException("Invalid SERVER_COUNT value: " + setupMode);
     }
+  }
+
+  public boolean shouldLogSql() {
+    return logSql;
   }
 
   public String getName() {

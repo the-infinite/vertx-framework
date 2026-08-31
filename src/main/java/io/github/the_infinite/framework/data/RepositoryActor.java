@@ -284,14 +284,19 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
    * @see #getById(long, LockModeType, RepositoryOptions, TSession)
    */
   public Future<Optional<TModel>> getById(long id, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction) {
-    return this.getById(id, LockModeType.OPTIMISTIC, options, transaction);
+    return this.getById(
+      id,
+      LockModeType.NONE,
+      options,
+      transaction
+    );
   }
 
   /**
    * @see #getById(long, LockModeType, RepositoryOptions, TSession)
    */
   public Future<Optional<TModel>> getById(long id, @NotNull RepositoryOptions<TModel> options) {
-    return this.getById(id, LockModeType.OPTIMISTIC, options, null);
+    return this.getById(id, LockModeType.NONE, options, null);
   }
 
   /**
