@@ -223,11 +223,9 @@ public final class DatabaseFactory {
       props.put("jakarta.persistence.validation.factory", ValidationHelper.getInstance().factory());
 
       //? If this is not a production build.
-      if (env.shouldLogSql()) {
-        props.put("hibernate.show_sql", true);
-        props.put("hibernate.format_sql", true);
-        props.put("hibernate.highlight_sql", true);
-      }
+      props.put("hibernate.show_sql", env.shouldLogSql());
+      props.put("hibernate.format_sql", env.shouldLogSql());
+      props.put("hibernate.highlight_sql", env.shouldLogSql());
 
       //? If caching is enabled...
       if (options.cachingStrategy == CachingStrategy.REDIS) {
