@@ -6,8 +6,10 @@ import org.hibernate.Hibernate;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
+import org.hibernate.UnknownEntityTypeException;
 import org.hibernate.engine.FetchTiming;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.persister.entity.EntityPersister;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -55,19 +57,60 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
    * Force-loads any lazy (DELAYED) persistent attribute of the entity while still inside the
    * worker-thread session boundary. This guarantees that downstream code and JSON serialization
    * never trigger a blocking JDBC query on the Vert.x event loop, which previously froze the app.
+   * <p>
+   * In a stateful (attached) session the entity <em>could</em> still lazy-load after it is
+   * returned, but that would happen on the Vert.x event loop (blocking), or after the session
+   * is closed / the entity is detached (LazyInitializationException). Eagerly initializing
+   * here makes the read path safe for detaching and for JSON serialization.
+   * <p>
+   * This is intentionally best-effort: if the metamodel cannot be resolved (e.g., the entity
+   * is a {@code HibernateProxy} subclass such as {@code MoovableUser$HibernateProxy}) or an
+   * individual attribute fails to initialize, the exception is swallowed and the entity is still
+   * returned. Callers that require a specific lazy graph should use a fetch join / entity graph.
    */
   private void initializeLazyState(TModel entity) {
-    final var persister = this.sessionFactory.unwrap(SessionFactoryImplementor.class)
-      .getMappingMetamodel()
-      .getEntityDescriptor(entity.getClass());
-    persister.forEachAttributeMapping(attribute -> {
-      if (attribute.getMappedFetchOptions().getTiming() == FetchTiming.DELAYED) {
-        final var value = attribute.getValue(entity);
-        if (value != null) {
-          Hibernate.initialize(value);
-        }
+    if (entity == null) {
+      return;
+    }
+    try {
+      // Hibernate.getClass() unwraps proxies (MoovableUser$HibernateProxy -> MoovableUser).
+      // Using entity.getClass() directly throws UnknownEntityTypeException for proxies.
+      Class<?> effectiveClass = Hibernate.getClass(entity);
+      if (effectiveClass == null || effectiveClass == Object.class) {
+        effectiveClass = modelType;
       }
-    });
+
+      final var metamodel = sessionFactory.unwrap(SessionFactoryImplementor.class).getMappingMetamodel();
+      var persister = (EntityPersister) null;
+      try {
+        persister = metamodel.getEntityDescriptor(effectiveClass);
+      } catch (UnknownEntityTypeException ex) {
+        persister = metamodel.getEntityDescriptor(modelType);
+      }
+
+      if (persister == null) {
+        return;
+      }
+
+      // Unproxy once so attribute.getValue works against the real instance.
+      final Object target = Hibernate.unproxy(entity);
+
+      persister.forEachAttributeMapping(attribute -> {
+        if (attribute.getMappedFetchOptions().getTiming() == FetchTiming.DELAYED) {
+          try {
+            final var value = attribute.getValue(target);
+            if (value != null) {
+              Hibernate.initialize(value);
+            }
+          } catch (Exception ignored) {
+            // Best-effort per-attribute; one failing attribute must not fail the whole load.
+          }
+        }
+      });
+    } catch (Exception ignored) {
+      // Best-effort: metamodel lookup or iteration failure should not fail the query.
+      // The entity will be returned without its lazy state fully initialized.
+    }
   }
 
   @Override
