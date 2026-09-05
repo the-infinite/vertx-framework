@@ -15,7 +15,6 @@ import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.validation.IsNullable;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * Produces a valid <a href="https://spec.openapis.org/oas/v3.1.0.html">OpenAPI 3.1</a>
@@ -27,7 +26,6 @@ import lombok.extern.slf4j.Slf4j;
  * <code>example</code> rich payloads over hand-built schema models.</p>
  */
 @SuppressWarnings("unused")
-@Slf4j
 public final class OpenApi3Generator {
   private static final String OPENAPI_VERSION = "3.1.0";
   private static final String DOCUMENTATION_CONTROLLER = "DocumentationController";
@@ -831,11 +829,9 @@ public final class OpenApi3Generator {
       return bound == null ? new JsonObject() : schemaForType(bound, resolving, bindings);
     }
     if (!(type instanceof Class<?> clazz)) {
-      log.info("Non class-type {}", type.getTypeName());
       return new JsonObject();
     }
     if (clazz == Object.class) {
-      log.info("Object class found, returning empty schema for {}", clazz.getName());
       return new JsonObject();
     }
 
@@ -860,7 +856,6 @@ public final class OpenApi3Generator {
     }
 
     if (Collection.class.isAssignableFrom(clazz)) {
-      log.info("Collection class found, initializing schema for {}", clazz.getName());
       return new JsonObject()
         .put("type", "array")
         .put("items", schemaForType(collectionElementType(clazz, bindings), resolving, bindings));

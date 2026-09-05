@@ -1,5 +1,7 @@
 package io.github.the_infinite.framework.data;
 
+import org.hibernate.query.criteria.JpaCriteriaQuery;
+
 import java.util.Objects;
 
 import jakarta.persistence.criteria.*;
@@ -8,12 +10,10 @@ import jakarta.persistence.criteria.*;
 public final class QueryData<T extends BaseEntity> {
   private final CriteriaBuilder builder;
   private final CriteriaQuery<T> query;
-  private final Class<T> entityClass;
   private final Root<T> root;
 
   QueryData(CriteriaBuilder builder, Class<T> clazz) {
     this.builder = builder;
-    this.entityClass = clazz;
     this.query = builder.createQuery(clazz);
     this.root = this.query.from(clazz);
   }
@@ -29,7 +29,7 @@ public final class QueryData<T extends BaseEntity> {
   }
 
   public Root<T> from() {
-    return query.from(query.getResultType());
+    return root;
   }
 
   public QueryData<T> where(Predicate... predicates) {
@@ -58,19 +58,11 @@ public final class QueryData<T extends BaseEntity> {
   }
 
   public CriteriaQuery<Long> count(Predicate... predicates) {
-    final var query = builder.createQuery(Long.class);
-
-    //? If there are no predicates...
-    if (predicates == null || predicates.length == 0 || predicates.length == 1 && predicates[0] == null) {
-      query.select(builder.count(query.from(entityClass)));
+    if (predicates != null && predicates.length > 0 && !(predicates.length == 1 && predicates[0] == null)) {
+      query.where(predicates);
     }
-
-    //? If there are predicates...
-    else {
-      query.select(builder.count(query.from(entityClass))).where(predicates);
-    }
-
-    return query;
+    this.select();
+    return ((JpaCriteriaQuery<T>) query).createCountQuery();
   }
 
   public CriteriaQuery<T> query() {

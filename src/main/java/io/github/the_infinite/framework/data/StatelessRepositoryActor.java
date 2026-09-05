@@ -25,8 +25,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
   }
 
   @Override
-  protected <T> Future<T> getOrCreateSession(@Nullable StatelessSession transaction, @Nullable RepositoryOptions<TModel> options,
-                                             SessionBoundHandler<StatelessSession, T> handler) {
+  protected <T> Future<T> getOrCreateSession(@Nullable StatelessSession transaction, @NotNull RepositoryOptions<TModel> options, SessionBoundHandler<StatelessSession, T> handler) {
     final var context = Vertx.currentContext();
     if (transaction != null) {
       return wrap(() -> handler.handle(transaction, context), context);
@@ -35,8 +34,7 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
     return wrap(() -> sessionFactory.fromStatelessSession(session -> handler.handle(session, context)), context);
   }
 
-  private <T> Future<T> getOrCreateTransaction(@Nullable StatelessSession transaction, @Nullable RepositoryOptions<TModel> options,
-                                               SessionBoundHandler<StatelessSession, T> handler) {
+  private <T> Future<T> getOrCreateTransaction(@Nullable StatelessSession transaction, @NotNull RepositoryOptions<TModel> options, SessionBoundHandler<StatelessSession, T> handler) {
     if (transaction != null) {
       return this.getOrCreateSession(transaction, options, handler);
     }
@@ -116,13 +114,32 @@ public final class StatelessRepositoryActor<TModel extends BaseEntity> extends R
   public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable StatelessSession transaction) {
     final var usedCursor = options.getCursor();
     final var usedLimit = options.getLimit();
-    final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
+    final var pureFilter = Objects.requireNonNullElse(filter, this.start());
+    final var usedFilters = buildWithCursor(pureFilter, usedCursor);
     return this.getOrCreateSession(transaction, options, (session, _) -> {
-      final var count = session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).setCacheMode(CacheMode.IGNORE).setCacheable(false).getSingleResult();
-      final var data = session.createQuery(usedFilters.select().query()).setCacheMode(CacheMode.IGNORE).setCacheable(false).setMaxResults(usedLimit).getResultList();
+      if (usedFilters.query().getOrderList().isEmpty()) {
+        final var cb = usedFilters.builder();
+        usedFilters.orderBy(cb.asc(usedFilters.root().get("id")));
+      }
+      final var selectQuery = usedFilters.select().query();
+      final var countQuery = pureFilter.count();
+      final var count = Objects.requireNonNullElse(
+        session.createQuery(countQuery)
+          .setCacheable(false)
+          .setCacheMode(CacheMode.IGNORE)
+          .getSingleResultOrNull(),
+        0L
+      );
+      final var rows = session.createQuery(selectQuery)
+        .setCacheable(false)
+        .setCacheMode(CacheMode.IGNORE)
+        .setMaxResults(usedLimit + 1).getResultList();
+      final var hasNext = rows.size() > usedLimit;
+      final var data = hasNext ? new ArrayList<>(rows.subList(0, usedLimit)) : rows;
+
       String nextCursor = null;
       try {
-        if (data.size() == usedLimit) {
+        if (hasNext) {
           nextCursor = makeCursor(data, usedLimit, usedCursor == null ? null : parseCursor(usedCursor));
         }
       } catch (JsonProcessingException e) {

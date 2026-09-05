@@ -202,7 +202,7 @@ public final class CorrelationContext implements AutoCloseable {
   }
 
 
-  /// Gets the request body of this correlation context, deserializes it into the given type and
+  /// Gets the request body of this correlation context, deserializes it into the given type, and
   /// validates it using the framework's fail-fast annotation validator. The first validation
   /// failure raises an `ErrorResult` carrying the offending field. This cannot be set if this
   /// correlation context was not created with a `RoutingContext`.

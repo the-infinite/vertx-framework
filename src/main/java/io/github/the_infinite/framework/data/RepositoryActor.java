@@ -8,6 +8,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -75,7 +76,10 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
    * @param cursor    The optional cursor we are building this about.
    * @return A probably updated criteria query.
    */
-  protected QueryData<TModel> buildWithCursor(@NotNull QueryData<TModel> queryData, @Nullable String cursor) {
+  protected final QueryData<TModel> buildWithCursor(
+    @NotNull QueryData<TModel> queryData,
+    @Nullable String cursor
+  ) {
     //? If this is not specified, we just return the original.
     if (cursor == null) {
       return queryData;
@@ -88,15 +92,27 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
       final var cursorData = parseCursor(cursor);
       final var cursorId = cursorData.cursor;
 
-      //? If this had a previous query specified, we need to AND it in.
+      //? Joining this in this place is a good thing
+      final var root = query.getRoots().stream()
+        .filter(r -> r.getJavaType().equals(modelType))
+        .findFirst()
+        .orElseGet(() -> query.from(modelType));
+
+      //? Build using safe reference
+      final var cb = sessionFactory.getCriteriaBuilder();
+      final var ordering = query.getOrderList().stream().findFirst();
+      final var order = ordering.orElse(cb.asc(root.get("id")));
+      final var cursorPredicate = order.isAscending()
+        ? cb.greaterThan(root.get("id"), cursorId)
+        : cb.lessThan(root.get("id"), cursorId);
+
+      //? Create the query.
       if (original != null) {
-        query.where(queryData.builder().and(original, sessionFactory.getCriteriaBuilder().greaterThan(query.from(modelType).get("id"), cursorId)));
+        query.where(cb.and(cursorPredicate, original));
+      } else {
+        query.where(cursorPredicate);
       }
 
-      //? Since there was nothing, we can just set something.
-      else {
-        query.where(queryData.builder().greaterThan(query.from(modelType).get("id"), cursorId));
-      }
       return queryData;
     } catch (Throwable t) {
       return queryData;
@@ -125,15 +141,20 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
       final var cursorData = parseCursor(cursor);
       final var cursorId = cursorData.cursor;
 
-      //? If this had a previous query specified, we need to AND it in.
+      //? Joining this in this place is a good thing
+      final var root = Objects.requireNonNullElse(query.getRoot(), query.from(modelType));
+
+      //? Build using safe reference
+      final var cb = sessionFactory.getCriteriaBuilder();
+      final var cursorPredicate = cb.greaterThan(root.get("id"), cursorId);
+
+      //? Create the query.
       if (original != null) {
-        query.where(queryData.builder().and(original, queryData.builder().greaterThan(queryData.from().get("id"), cursorId)));
+        query.where(cb.and(cursorPredicate, original));
+      } else {
+        query.where(cursorPredicate);
       }
 
-      //? Since there was nothing, we can just set something.
-      else {
-        query.where(queryData.builder().greaterThan(queryData.from().get("id"), cursorId));
-      }
       return queryData;
     } catch (Throwable t) {
       return queryData;
@@ -189,7 +210,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
    * @return The transaction session if it exists, or a session built around task promise that would be disposed when
    * it completes.
    */
-  abstract protected <T> Future<T> getOrCreateSession(@Nullable TSession transaction, @Nullable RepositoryOptions<TModel> options, SessionBoundHandler<TSession, T> handler);
+  abstract protected <T> Future<T> getOrCreateSession(@Nullable TSession transaction, @NotNull RepositoryOptions<TModel> options, SessionBoundHandler<TSession, T> handler);
 
   abstract public <ReturnType> Future<ReturnType> transaction(@NotNull RepositoryOptions<TModel> options, Function<TSession, Future<ReturnType>> future);
 

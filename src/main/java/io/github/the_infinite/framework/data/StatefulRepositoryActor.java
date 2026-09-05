@@ -114,13 +114,13 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   @Override
-  protected <T> Future<T> getOrCreateSession(@Nullable Session transaction, @Nullable RepositoryOptions<TModel> options, SessionBoundHandler<Session, T> handler) {
+  protected <T> Future<T> getOrCreateSession(@Nullable Session transaction, @NotNull RepositoryOptions<TModel> options, SessionBoundHandler<Session, T> handler) {
     final var context = Vertx.currentContext();
     if (transaction != null) {
       return wrap(() -> handler.handle(transaction, context), context);
     }
 
-    final var correlation = options == null ? null : options.getCorrelation();
+    final var correlation = options.getCorrelation();
     if (correlation != null) {
       return wrap(() -> handler.handle(correlation.getSession(sessionFactory), context), context);
     }
@@ -128,13 +128,13 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
     return wrap(() -> sessionFactory.fromSession(session -> handler.handle(session, context)), context);
   }
 
-  private <T> Future<T> getOrCreateTransaction(@Nullable Session transaction, @Nullable RepositoryOptions<TModel> options, SessionBoundHandler<Session, T> handler) {
+  private <T> Future<T> getOrCreateTransaction(@Nullable Session transaction, @NotNull RepositoryOptions<TModel> options, SessionBoundHandler<Session, T> handler) {
     if (transaction != null) {
       return this.getOrCreateSession(transaction, options, handler);
     }
 
     final var context = Vertx.currentContext();
-    final var correlation = options == null ? null : options.getCorrelation();
+    final var correlation = options.getCorrelation();
     if (correlation != null) {
       return wrap(() -> {
         final var session = correlation.getSession(sessionFactory);
@@ -266,14 +266,28 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   public Future<PaginatedResult<TModel>> getPaginatedView(@Nullable QueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable Session transaction) {
     final var usedCursor = options.getCursor();
     final var usedLimit = options.getLimit();
-    final var usedFilters = buildWithCursor(Objects.requireNonNullElse(filter, this.start()), usedCursor);
+    final var pureFilter = Objects.requireNonNullElse(filter, this.start());
+    final var usedFilters = buildWithCursor(pureFilter, usedCursor);
     return this.getOrCreateSession(transaction, options, (session, _) -> {
-      final var count = session.createQuery(usedFilters.count(usedFilters.select().query().getRestriction())).getSingleResult();
-      final var data = session.createQuery(usedFilters.select().query()).setMaxResults(usedLimit).getResultList();
+      if (usedFilters.query().getOrderList().isEmpty()) {
+        final var cb = usedFilters.builder();
+        usedFilters.orderBy(cb.asc(usedFilters.root().get("id")));
+      }
+      final var selectQuery = usedFilters.select().query();
+      final var countQuery = pureFilter.count();
+      final var count = Objects.requireNonNullElse(
+        session.createQuery(countQuery).getSingleResultOrNull(),
+        0L
+      );
+      final var rows = session.createQuery(selectQuery).setMaxResults(usedLimit + 1).getResultList();
+      final var hasNext = rows.size() > usedLimit;
+      final var data = hasNext ? new ArrayList<>(rows.subList(0, usedLimit)) : rows;
+
+      //? Okay then.
       this.prepareDetached(session, options, data);
       String nextCursor = null;
       try {
-        if (data.size() == usedLimit) {
+        if (hasNext) {
           nextCursor = makeCursor(data, usedLimit, usedCursor == null ? null : parseCursor(usedCursor));
         }
       } catch (JsonProcessingException e) {
