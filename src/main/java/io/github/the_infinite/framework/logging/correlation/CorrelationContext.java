@@ -5,9 +5,10 @@ import org.hibernate.SessionFactory;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import io.github.the_infinite.framework.data.DBSessionListener;
 import io.github.the_infinite.framework.middleware.GeneralMiddlewares;
 import io.github.the_infinite.framework.response.ErrorResult;
 import io.github.the_infinite.framework.utils.DataHelpers;
@@ -20,15 +21,19 @@ import io.vertx.core.json.Json;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.validation.RequestParameters;
 import io.vertx.ext.web.validation.ValidationHandler;
+import lombok.extern.slf4j.Slf4j;
 
 @SuppressWarnings("unused")
+@Slf4j
 public final class CorrelationContext implements AutoCloseable {
   private static final String CONTEXT_KEY = "CORRELATION_ID";
   private static final String CONTEXT_USER = "TVT_USER_ID";
+  private static final String INSTANCE_KEY = "TVT_CORRELATION_CONTEXT";
+  private static final String REQUEST_ID = "TVT_REQUEST_ID";
   private final RoutingContext routingContext;
   private final AtomicReference<Session> session;
   private final Context vertxContext;
-  private final AtomicBoolean holdLock;
+  private final AtomicInteger holdLock;
 
   //? This is fine too.
   private CorrelationContext(@NotNull RoutingContext routingContext) {
@@ -42,7 +47,7 @@ public final class CorrelationContext implements AutoCloseable {
     //? This is fine too.
     this.routingContext = routingContext;
     this.vertxContext = null;
-    this.holdLock = new AtomicBoolean(false);
+    this.holdLock = new AtomicInteger(0);
     this.session = new AtomicReference<>(null);
   }
 
@@ -57,18 +62,28 @@ public final class CorrelationContext implements AutoCloseable {
     //? This is fine too.
     this.routingContext = null;
     this.vertxContext = vertxContext;
-    this.holdLock = new AtomicBoolean(false);
+    this.holdLock = new AtomicInteger(0);
     this.session = new AtomicReference<>(null);
   }
 
-  /// Build a correlation context using a routing context.
   public static CorrelationContext from(@NotNull RoutingContext routingContext) {
-    return new CorrelationContext(routingContext);
+    final CorrelationContext existing = routingContext.get(INSTANCE_KEY);
+    if (existing != null) {
+      return existing;
+    }
+    final var created = new CorrelationContext(routingContext);
+    routingContext.put(INSTANCE_KEY, created);
+    return created;
   }
 
-  ///  Build a context from a given vertx context.
-  public static CorrelationContext from(@NotNull Context context) {
-    return new CorrelationContext(context);
+  public static CorrelationContext from(@NotNull Context vertxContext) {
+    final CorrelationContext existing = vertxContext.get(INSTANCE_KEY);
+    if (existing != null) {
+      return existing;
+    }
+    final var created = new CorrelationContext(vertxContext);
+    vertxContext.put(INSTANCE_KEY, created);
+    return created;
   }
 
   /// Gets the pure form of the routing context. Useful in situations where there is a need to log this out in a certain
@@ -132,6 +147,14 @@ public final class CorrelationContext implements AutoCloseable {
     throw new IllegalStateException("Cannot determine request IP address because the remote address is unavailable");
   }
 
+  public void setRequestId(String requestId) {
+    set(REQUEST_ID, requestId);
+  }
+
+  public String getRequestId() {
+    return get(REQUEST_ID);
+  }
+
   /// Is the context this correlation context enclosing still useful? Used as a means of checking to avoid throwing
   /// errors that could have been otherwise avoided.
   public boolean isAvailable() {
@@ -158,23 +181,12 @@ public final class CorrelationContext implements AutoCloseable {
   //? Getting the correlation context here as needed.
   @Override
   public void close() throws Exception {
-    cleanup();
-  }
+    if (session == null || session.get() == null || !session.get().isOpen()) {
+      return;
+    }
 
-  public void holdLock() {
-    holdLock.set(true);
-  }
-
-  public void releaseLock() {
-    holdLock.set(false);
-  }
-
-  /**
-   * Cleans up the correlation context. This will close any running database sessions if
-   * they exist.
-   */
-  public void cleanup() {
-    if (session == null || session.get() == null || holdLock.get()) {
+    holdLock.decrementAndGet();
+    if (holdLock.get() > 0) {
       return;
     }
 
@@ -187,6 +199,10 @@ public final class CorrelationContext implements AutoCloseable {
     session.set(null);
   }
 
+  public void holdLock() {
+    holdLock.incrementAndGet();
+  }
+
   /**
    * Gets the session from the correlation context. If the session is not set, it will be
    * created.
@@ -196,7 +212,9 @@ public final class CorrelationContext implements AutoCloseable {
       return session.get();
     }
 
+    holdLock.incrementAndGet();
     final var foundSession = factory.openSession();
+    foundSession.addEventListeners(new DBSessionListener());
     session.set(foundSession);
     return foundSession;
   }

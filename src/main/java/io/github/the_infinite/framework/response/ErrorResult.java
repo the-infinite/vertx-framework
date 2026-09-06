@@ -43,28 +43,70 @@ public class ErrorResult extends Exception implements DocumentableDTO {
     final var env = AppEnvironment.getInstance();
     return switch (t) {
       case ErrorResult er -> er;
-      case PgException e -> new ErrorResult(e.getErrorMessage(), e.getMessage(), 500);
-      case ValidationException e -> new ErrorResult(e.getMessage(), e.getField(), 400);
-      case ValueInstantiationException e ->
-        new ErrorResult(e.getMessage().split("\\n")[0], e, 400);
-      case MismatchedInputException e ->
-        new ErrorResult(e.getMessage().split("\\n")[0], e, 400);
+      case PgException e -> new ErrorResult(
+        env.isProduction()
+          ? "Something unexpected has happened."
+          : e.getErrorMessage(),
+        e.getMessage(),
+        500
+      );
+      case ValidationException e -> new ErrorResult(
+        env.isProduction()
+          ? "Something unexpected has happened."
+          : e.getMessage(),
+        e.getField(),
+        400
+      );
+      case ValueInstantiationException e -> new ErrorResult(
+        e.getMessage().split("\\n")[0],
+        e,
+        400
+      );
+      case MismatchedInputException e -> new ErrorResult(
+        e.getMessage().split("\\n")[0],
+        e,
+        400
+      );
       case ParameterProcessorException e -> new ErrorResult(e.getMessage(),
         "%s at %s".formatted(e.getParameterName(),
           e.getLocation().name()),
         400);
-      case IllegalArgumentException e -> new ErrorResult(e.getMessage(), e, 400);
-      case IllegalStateException e -> new ErrorResult(e.getMessage(), e, 400);
-      case BodyProcessorException e -> new ErrorResult(e.getMessage(),
-        "%s found %s".formatted(e.getErrorType().name(),
-          e.getActualContentType())
-        , 400);
-      case RequestPredicateException e -> new ErrorResult(e.getMessage(),
-        Objects.requireNonNullElse(e.getCause(), t).getMessage(), 400);
-      default -> new ErrorResult(t.getMessage(),
-        env.getKind() == AppEnvironment.EnvironmentKind.PRODUCTION ?
+      case IllegalArgumentException e -> new ErrorResult(
+        env.isProduction()
+          ? "Something unexpected has happened. Please try again later"
+          : e.getMessage(),
+        e,
+        400
+      );
+      case IllegalStateException e -> new ErrorResult(
+        env.isProduction()
+          ? "Something unexpected has happened. Please try again later"
+          : e.getMessage(),
+        e,
+        400
+      );
+      case BodyProcessorException e -> new ErrorResult(
+        env.isProduction()
+          ? "Unexpected request."
+          : e.getMessage(),
+        "%s found %s".formatted(e.getErrorType().name(), e.getActualContentType()),
+        400
+      );
+      case RequestPredicateException e -> new ErrorResult(
+        env.isProduction()
+          ? "Unexpected request. Please try again later"
+          : e.getMessage(),
+        Objects.requireNonNullElse(e.getCause(), t).getMessage(),
+        400
+      );
+      default -> new ErrorResult(
+        env.isProduction()
+          ? "An unexpected error occurred. Please try again later."
+          : t.getMessage(),
+        env.isProduction() ?
           "An unexpected error occurred." : t,
-        500);
+        500
+      );
     };
   }
 

@@ -301,6 +301,10 @@ public class AppEnvironment {
     return rabbitMqVhost;
   }
 
+  public boolean isProduction() {
+    return this.kind == EnvironmentKind.PRODUCTION;
+  }
+
   /**
    * Internal utility function to get an environment variable value and cast it
    * to the appropriate type.

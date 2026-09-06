@@ -1,17 +1,16 @@
 package io.github.the_infinite.framework.logging.console;
 
-import io.github.the_infinite.framework.ConfigurationRegistrant;
-import io.github.the_infinite.framework.env.AppEnvironment;
-import io.github.the_infinite.framework.logging.ILogger;
-import io.github.the_infinite.framework.logging.TimeEvent;
-import io.github.the_infinite.framework.utils.DataHelpers;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import io.github.the_infinite.framework.ConfigurationRegistrant;
+import io.github.the_infinite.framework.env.AppEnvironment;
+import io.github.the_infinite.framework.logging.ILogger;
+import io.github.the_infinite.framework.logging.TimeEvent;
+import io.github.the_infinite.framework.utils.DataHelpers;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 

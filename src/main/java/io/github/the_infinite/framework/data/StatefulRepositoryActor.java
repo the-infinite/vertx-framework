@@ -2,22 +2,15 @@ package io.github.the_infinite.framework.data;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 
-import org.hibernate.Hibernate;
-import org.hibernate.Session;
-import org.hibernate.SessionFactory;
-import org.hibernate.Transaction;
-import org.hibernate.UnknownEntityTypeException;
+import org.hibernate.*;
 import org.hibernate.engine.FetchTiming;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.metamodel.mapping.internal.ToOneAttributeMapping;
 import org.hibernate.persister.entity.EntityPersister;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.function.Function;
 
 import io.github.the_infinite.framework.data.types.ChangeResultModel;
@@ -28,7 +21,9 @@ import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.LockModeType;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public final class StatefulRepositoryActor<TModel extends BaseEntity> extends RepositoryActor<TModel, Session> {
   StatefulRepositoryActor(SessionFactory sessionFactory, Class<TModel> modelType) {
     super(sessionFactory, modelType);
@@ -69,47 +64,40 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
    * returned. Callers that require a specific lazy graph should use a fetch join / entity graph.
    */
   private void initializeLazyState(TModel entity) {
-    if (entity == null) {
-      return;
-    }
+    initializeLazyState(entity, modelType, Collections.newSetFromMap(new IdentityHashMap<>()), 0);
+  }
+
+  private void initializeLazyState(Object entity, Class<?> declaredType, Set<Object> visited, int depth) {
+    if (entity == null || depth > 2 || !visited.add(entity))
+      return; // depth cap + cycle guard
     try {
-      // Hibernate.getClass() unwraps proxies (MoovableUser$HibernateProxy -> MoovableUser).
-      // Using entity.getClass() directly throws UnknownEntityTypeException for proxies.
       Class<?> effectiveClass = Hibernate.getClass(entity);
-      if (effectiveClass == null || effectiveClass == Object.class) {
-        effectiveClass = modelType;
-      }
+      if (effectiveClass == null || effectiveClass == Object.class)
+        effectiveClass = declaredType;
 
       final var metamodel = sessionFactory.unwrap(SessionFactoryImplementor.class).getMappingMetamodel();
-      var persister = (EntityPersister) null;
+      EntityPersister persister;
       try {
         persister = metamodel.getEntityDescriptor(effectiveClass);
       } catch (UnknownEntityTypeException ex) {
-        persister = metamodel.getEntityDescriptor(modelType);
+        return; // not an entity type (embeddable/basic) — nothing to recurse into
       }
 
-      if (persister == null) {
-        return;
-      }
-
-      // Unproxy once so attribute.getValue works against the real instance.
       final Object target = Hibernate.unproxy(entity);
-
       persister.forEachAttributeMapping(attribute -> {
-        if (attribute.getMappedFetchOptions().getTiming() == FetchTiming.DELAYED) {
-          try {
-            final var value = attribute.getValue(target);
-            if (value != null) {
-              Hibernate.initialize(value);
-            }
-          } catch (Exception ignored) {
-            // Best-effort per-attribute; one failing attribute must not fail the whole load.
+        try {
+          final var value = attribute.getValue(target);
+          if (attribute.getMappedFetchOptions().getTiming() == FetchTiming.DELAYED && value != null) {
+            Hibernate.initialize(value);
           }
+          // Recurse into to-one associations even if eager — they may carry their own lazy fields.
+          if (value != null && attribute instanceof ToOneAttributeMapping) {
+            initializeLazyState(value, value.getClass(), visited, depth + 1);
+          }
+        } catch (Exception ignored) {
         }
       });
     } catch (Exception ignored) {
-      // Best-effort: metamodel lookup or iteration failure should not fail the query.
-      // The entity will be returned without its lazy state fully initialized.
     }
   }
 
@@ -125,7 +113,10 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
       return wrap(() -> handler.handle(correlation.getSession(sessionFactory), context), context);
     }
 
-    return wrap(() -> sessionFactory.fromSession(session -> handler.handle(session, context)), context);
+    return wrap(() -> sessionFactory.fromSession(session -> {
+      session.addEventListeners(new DBSessionListener());
+      return handler.handle(session, context);
+    }), context);
   }
 
   private <T> Future<T> getOrCreateTransaction(@Nullable Session transaction, @NotNull RepositoryOptions<TModel> options, SessionBoundHandler<Session, T> handler) {

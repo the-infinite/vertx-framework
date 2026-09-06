@@ -25,7 +25,7 @@ public final class RepositoryOptions<T> {
   }
 
   public RepositoryOptions(Object user, CorrelationContext context) {
-    this(user, context, true);
+    this(user, context, false);
   }
 
   public RepositoryOptions(long userId, CorrelationContext context) {

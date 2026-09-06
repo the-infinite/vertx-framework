@@ -5,6 +5,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import org.hibernate.SessionFactory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.List;
@@ -26,7 +28,7 @@ import jakarta.persistence.LockModeType;
 
 @SuppressWarnings("unused")
 public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession> permits StatefulRepositoryActor, StatelessRepositoryActor {
-  private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(RepositoryActor.class);
+  private static final Logger logger = LoggerFactory.getLogger(RepositoryActor.class);
   protected final SessionFactory sessionFactory;
   protected final Class<TModel> modelType;
 
@@ -234,8 +236,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   // Region for create methods.
   abstract public Future<List<TModel>> createMany(@NotNull List<TModel> items, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
-  abstract public Future<Optional<TModel>> createOne(@NotNull TModel item,
-                                                     @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
+  abstract public Future<Optional<TModel>> createOne(@NotNull TModel item, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
   // End region for create methods.
 
 
@@ -258,8 +259,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
   // Region for delete methods.
   abstract public Future<Integer> deleteMany(@Nullable DeleteQueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
-  abstract public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter,
-                                            @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
+  abstract public Future<Boolean> deleteOne(@Nullable DeleteQueryData<TModel> filter, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
 
   abstract public Future<Optional<TModel>> deleteById(long id, @NotNull RepositoryOptions<TModel> options, @Nullable TSession transaction);
   // End region for delete methods.

@@ -88,6 +88,7 @@ public abstract class RouteController {
   static Handler<RoutingContext> wrapMiddleware(Handler<CorrelationContext> middleware) {
     final var env = AppEnvironment.getInstance();
     return routingContext -> {
+      propContext(routingContext);
       final var correlationContext = CorrelationContext.from(routingContext);
       try {
         middleware.handle(correlationContext);
@@ -100,6 +101,19 @@ public abstract class RouteController {
         endAs(errorResult.toServiceResult(), correlationContext);
       }
     };
+  }
+
+  private static void propContext(RoutingContext ctx) {
+    if (ctx.get("OKAY") != null) {
+      return;
+    }
+    ctx.put("OKAY", true);
+    ctx.addEndHandler(_ -> {
+      try {
+        CorrelationContext.from(ctx).close();
+      } catch (Exception ignored) {
+      }
+    });
   }
 
   static private String extractResultBody(TypedServiceResult<?> result) {
@@ -126,7 +140,6 @@ public abstract class RouteController {
 
     //? If this has been sent or is no longer needed...
     if (response.headWritten() || response.ended()) {
-      context.cleanup();
       return;
     }
 
@@ -140,7 +153,6 @@ public abstract class RouteController {
     if (resultBody == null) {
       final var error = new IllegalStateException("Response body is null");
       response.putHeader("Content-Type", "text/plain").setStatusCode(503).end(ErrorResult.of(error).toServiceResult().getMessage());
-      context.cleanup();
       throw error;
     }
 
@@ -148,46 +160,41 @@ public abstract class RouteController {
     if (result.getResponseType() == TypedServiceResult.ResponseType.JSON) {
       response.putHeader("Content-Type", "application/json");
       response.end(resultBody);
-      context.cleanup();
       return;
     }
 
     if (result.getResponseType() == TypedServiceResult.ResponseType.FILE) {
       response.putHeader("Content-Disposition", "attachment; filename=\"%s\"".formatted(resultBody.substring(resultBody.lastIndexOf("/") + 1)));
       response.sendFile(resultBody);
-      context.cleanup();
       return;
     }
 
     if (result.getResponseType() == TypedServiceResult.ResponseType.XML) {
       response.putHeader("Content-Type", "application/xml");
       response.end(resultBody);
-      context.cleanup();
       return;
     }
 
     if (result.getResponseType() == TypedServiceResult.ResponseType.JAVASCRIPT) {
       response.putHeader("Content-Type", "application/javascript");
       response.end(resultBody);
-      context.cleanup();
       return;
     }
 
     if (result.getResponseType() == TypedServiceResult.ResponseType.HTML) {
       response.putHeader("Content-Type", "text/html");
       response.end(resultBody);
-      context.cleanup();
       return;
     }
 
     //? Default to plain text.
     response.putHeader("Content-Type", "text/plain");
     response.end(resultBody);
-    context.cleanup();
   }
 
   static private <T> Handler<RoutingContext> wrapHandler(RouteHandler<T> handler) {
     return routingContext -> {
+      propContext(routingContext);
       final var env = AppEnvironment.getInstance();
       final var correlationContext = CorrelationContext.from(routingContext);
       correlationContext.set(REQUEST_ID, new String(new SecureRandom().generateSeed(Long.SIZE)));
@@ -279,7 +286,6 @@ public abstract class RouteController {
 
     DocumentationRegistrant.getInstance().registerRoute(fullPath, method.name(), this.getClass().getSimpleName(), description);
     final var route = registrant.router.route().method(method).path(fullPath);
-
 
     //? 1. Handle Body Processing & Validation Safely
     if (hasBody) {
