@@ -1,6 +1,7 @@
 package io.github.the_infinite.framework.middleware;
 
 import java.security.SecureRandom;
+import java.util.HexFormat;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -8,7 +9,6 @@ import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
 import io.github.the_infinite.framework.logging.correlation.CorrelationFlow;
 import io.github.the_infinite.framework.middleware.rate.RateLimiter;
 import io.github.the_infinite.framework.response.ErrorResult;
-
 import io.github.the_infinite.framework.utils.DataHelpers;
 import io.vertx.core.Handler;
 
@@ -24,7 +24,7 @@ public final class GeneralMiddlewares {
     //? If this request doesn't have a request ID, generate one and store it in the context...
     return ctx -> {
       if (ctx.getRequestId() == null) {
-        final var requestId = new String(new SecureRandom().generateSeed(Long.SIZE));
+        final var requestId = HexFormat.of().formatHex(new SecureRandom().generateSeed(Long.SIZE));
         ctx.setRequestId(requestId);
       }
 
