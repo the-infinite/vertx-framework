@@ -1,8 +1,11 @@
 package io.github.the_infinite.framework.middleware;
 
+import java.security.SecureRandom;
 import java.util.Objects;
+import java.util.Optional;
 
 import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
+import io.github.the_infinite.framework.logging.correlation.CorrelationFlow;
 import io.github.the_infinite.framework.middleware.rate.RateLimiter;
 import io.github.the_infinite.framework.response.ErrorResult;
 
@@ -17,6 +20,18 @@ public final class GeneralMiddlewares {
   public static final String PAGINATION_LIMIT = "Pagination.Limit";
   public static final String PAGINATION_CURSOR = "Pagination.Cursor";
 
+  public static Handler<CorrelationContext> requestIdentifier() {
+    //? If this request doesn't have a request ID, generate one and store it in the context...
+    return ctx -> {
+      if (ctx.getRequestId() == null) {
+        final var requestId = new String(new SecureRandom().generateSeed(Long.SIZE));
+        ctx.setRequestId(requestId);
+      }
+
+      ctx.router().next();
+    };
+  }
+
   /**
    * Extracts the existing correlation ID from the request header "X-Correlation-ID" if present.
    *
@@ -25,11 +40,18 @@ public final class GeneralMiddlewares {
   public static Handler<CorrelationContext> correlationIdExtractor() {
     return ctx -> {
       final var correlationId = ctx.router().request().getHeader("X-Correlation-ID");
+      final var correlationFlow = Optional.ofNullable(
+          ctx.router().request()
+            .getHeader("X-Correlation-Flow")
+        ).map(String::trim)
+        .map(String::toUpperCase)
+        .map(CorrelationFlow::valueOf)
+        .orElse(CorrelationFlow.ONCE);
       if (correlationId != null && !correlationId.isEmpty()) {
-        ctx.withCorrelationId(correlationId).router().next();
+        ctx.withCorrelationId(correlationId).withFlow(correlationFlow).router().next();
         return;
       }
-      ctx.router().next();
+      ctx.withFlow(correlationFlow).router().next();
     };
   }
 

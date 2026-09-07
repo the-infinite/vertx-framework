@@ -30,6 +30,7 @@ public final class CorrelationContext implements AutoCloseable {
   private static final String CONTEXT_USER = "TVT_USER_ID";
   private static final String INSTANCE_KEY = "TVT_CORRELATION_CONTEXT";
   private static final String REQUEST_ID = "TVT_REQUEST_ID";
+  private CorrelationFlow flow = CorrelationFlow.ONCE;
   private final RoutingContext routingContext;
   private final AtomicReference<Session> session;
   private final Context vertxContext;
@@ -153,6 +154,15 @@ public final class CorrelationContext implements AutoCloseable {
 
   public String getRequestId() {
     return get(REQUEST_ID);
+  }
+
+  public CorrelationContext withFlow(CorrelationFlow flow) {
+    this.flow = flow;
+    return this;
+  }
+
+  public CorrelationFlow flow() {
+    return flow;
   }
 
   /// Is the context this correlation context enclosing still useful? Used as a means of checking to avoid throwing

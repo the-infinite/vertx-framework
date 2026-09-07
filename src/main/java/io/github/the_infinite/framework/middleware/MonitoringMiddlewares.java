@@ -1,10 +1,10 @@
 package io.github.the_infinite.framework.middleware;
 
-import java.security.SecureRandom;
+import org.jetbrains.annotations.NotNull;
+
 import java.util.Map;
 import java.util.function.Function;
 
-import io.github.the_infinite.framework.RouteController;
 import io.github.the_infinite.framework.logging.correlation.CorrelationContext;
 import io.github.the_infinite.framework.logging.monitor.LogEvent;
 import io.github.the_infinite.framework.utils.DataHelpers;
@@ -12,7 +12,11 @@ import io.vertx.core.Handler;
 
 @SuppressWarnings("unused")
 public final class MonitoringMiddlewares {
-  public static Handler<CorrelationContext> requestLogger(Function<LogEvent<String>, Void> monitor) {
+  private static final String REQUEST_ID = "Request.Id";
+
+  public static Handler<CorrelationContext> requestLogger(
+    @NotNull Function<LogEvent<String>, Void> monitor
+  ) {
     return ctx -> {
       final var startTime = System.currentTimeMillis();
       final var request = ctx.router().request();
@@ -20,7 +24,7 @@ public final class MonitoringMiddlewares {
         final var endTime = System.currentTimeMillis();
         monitor.apply(LogEvent.create(
           "Request context is not available.",
-          RouteController.REQUEST_ID,
+          REQUEST_ID,
           "unknown",
           Map.of(
             "requestId", "unknown",
@@ -46,28 +50,16 @@ public final class MonitoringMiddlewares {
         return;
       }
 
-      //? If this request doesn't have a request ID, generate one and store it in the context...
-      if (ctx.get(RouteController. REQUEST_ID) == null) {
-        final var requestId = new String(new SecureRandom().generateSeed(Long.SIZE));
-        ctx.set(RouteController. REQUEST_ID, requestId);
-      }
-
       //? Get the response.
-      final var requestId = ctx.<String>get(RouteController. REQUEST_ID);
+      final var requestId = ctx.getRequestId();
       final var response = ctx.router().response();
-
-      //? Now, write this request ID to the response...
-      if (!response.headWritten() && !response.closed()) {
-        response.putHeader("X-Request-ID", requestId);
-        response.putHeader("X-Correlation-ID", ctx.correlationId());
-      }
 
       //? Await the next function to complete, and then log the response...
       ctx.router().addEndHandler(endResult -> {
         final var endTime = System.currentTimeMillis();
         monitor.apply(LogEvent.create(
           "Incoming request from client",
-           RouteController.REQUEST_ID,
+          REQUEST_ID,
           requestId,
           Map.of(
             "requestId", requestId,
