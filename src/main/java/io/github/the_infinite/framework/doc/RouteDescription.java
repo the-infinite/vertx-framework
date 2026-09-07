@@ -104,10 +104,6 @@ public record RouteDescription(String group,
   public Map<String, String> headers() {
     final var completeHeaders = new HashMap<>(registrant.getUnauthenticatedGlobalHeaders());
 
-    if (authenticationRequired) {
-      completeHeaders.putAll(registrant.getAuthenticatedGlobalHeaders());
-    }
-
     if (this.headers != null && !this.headers.isEmpty()) {
       completeHeaders.putAll(this.headers);
     }
