@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.text.Normalizer;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -35,6 +36,9 @@ import io.vertx.core.Promise;
 
 @SuppressWarnings("unused")
 public final class DataHelpers {
+  // Matches characters that are NOT letters, digits, dots, hyphens, or underscores
+  private static final Pattern ALLOWED_LOCAL_CHARS = Pattern.compile("[^a-zA-Z0-9._-]");
+  private static final Pattern ALLOWED_DOMAIN_CHARS = Pattern.compile("[^a-zA-Z0-9.-]");
   private static final Pattern EMAIL_PATTERN = Pattern.compile("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
   private static final ObjectMapper OBJECT_WRITER = new ObjectMapper()
     .registerModule(new JavaTimeModule())
@@ -400,6 +404,49 @@ public final class DataHelpers {
   public static String toKebabCase(String str) {
     if (str == null) return null;
     return str.replaceAll("([a-z])([A-Z]+)", "$1-$2").toLowerCase();
+  }
+
+  public static String toSnakeCase(String str) {
+    if (str == null) return null;
+    return str.replaceAll("([a-z])([A-Z]+)", "$1_$2").toLowerCase();
+  }
+
+  public String sanitizeEmail(String email) {
+    if (email == null || email.isBlank()) {
+      return null;
+    }
+
+    // 1. Normalization: Trim whitespace and lowercase the input
+    String cleanEmail = email.trim().toLowerCase(Locale.ROOT);
+
+    // 2. Unicode Normalization: Convert accented characters to standard ASCII forms (e.g., é -> e)
+    cleanEmail = Normalizer.normalize(cleanEmail, Normalizer.Form.NFD);
+    cleanEmail = cleanEmail.replaceAll("[^\\p{ASCII}]", "");
+
+    // Ensure there is exactly one '@' separator
+    int atIndex = cleanEmail.indexOf('@');
+    if (atIndex == -1 || atIndex != cleanEmail.lastIndexOf('@') || atIndex == 0 || atIndex == cleanEmail.length() - 1) {
+      return null; // Invalid email format
+    }
+
+    String localPart = cleanEmail.substring(0, atIndex);
+    String domainPart = cleanEmail.substring(atIndex + 1);
+
+    // 3. Handle Plus Addressing (Subaddressing): Strip anything from '+' to the end of the local part
+    if (localPart.contains("+")) {
+      localPart = localPart.split("\\+", 2)[0];
+    }
+
+    // 4. Remove Illegal Special Characters from the local and domain parts
+    localPart = ALLOWED_LOCAL_CHARS.matcher(localPart).replaceAll("");
+    domainPart = ALLOWED_DOMAIN_CHARS.matcher(domainPart).replaceAll("");
+
+    // Final safety check: if cleaning stripped everything, return null
+    if (localPart.isEmpty() || domainPart.isEmpty()) {
+      return null;
+    }
+
+    return localPart + "@" + domainPart;
   }
 
   public static boolean validateEmail(String str) {

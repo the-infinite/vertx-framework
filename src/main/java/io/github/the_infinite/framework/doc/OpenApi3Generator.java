@@ -12,6 +12,7 @@ import java.time.*;
 import java.util.*;
 
 import io.github.the_infinite.framework.env.AppEnvironment;
+import io.github.the_infinite.framework.utils.DataHelpers;
 import io.github.the_infinite.framework.validation.IsNullable;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -571,17 +572,27 @@ public final class OpenApi3Generator {
     }
 
     final var authHeaders = registrant.getAuthenticatedGlobalHeaders();
+    final var securitySchemes = new JsonObject();
 
     for (final var header : authHeaders.entrySet()) {
       final var headerName = header.getKey();
       final var description = header.getValue();
-      result.put("securitySchemes", new JsonObject()
-        .put("authentication", new JsonObject()
-          .put("type", "apiKey")
-          .put("in", "header")
-          .put("name", headerName)
-          .put("description", description)));
+      final var hasAuthorization = headerName.equalsIgnoreCase("Authorization");
+      final var scheme = new JsonObject()
+        .put("in", "header")
+        .put("name", headerName)
+        .put("description", description);
+
+      if (hasAuthorization) {
+        scheme.put("type", "http");
+        scheme.put("scheme", "bearer");
+      } else {
+        scheme.put("type", "apiKey");
+      }
+
+      securitySchemes.put(DataHelpers.toKebabCase(headerName), scheme);
     }
+    result.put("securitySchemes", securitySchemes);
     return result;
   }
 
