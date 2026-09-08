@@ -4,10 +4,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -37,7 +34,7 @@ public class ConfigurationRegistrant {
   static final Map<Integer, NetServer> deployedSockets = new ConcurrentHashMap<>();
   static final Map<Integer, Object> deployedConsumers = new ConcurrentHashMap<>();
   static final Map<Integer, JobRegistry> deployedWorkers = new ConcurrentHashMap<>();
-  private static final Map<Vertx, ConfigurationRegistrant> instances = new ConcurrentHashMap<>();
+  private static final Map<Vertx, ConfigurationRegistrant> instances = Collections.synchronizedMap(new WeakHashMap<>());
   private static final ReadWriteLock serverLocker = new ReentrantReadWriteLock();
   private static final ReadWriteLock consumerLocker = new ReentrantReadWriteLock();
   private static final ReadWriteLock workerLocker = new ReentrantReadWriteLock();
@@ -98,9 +95,10 @@ public class ConfigurationRegistrant {
   }
 
   public static void setUp(Vertx vertx, @Nullable String envFile) throws IllegalArgumentException {
-    //? If this already exists...
-    if (instances.containsKey(vertx)) {
-      throw new IllegalStateException("This configuration registrant has already been initialized");
+    synchronized (instances) {
+      if (instances.containsKey(vertx)) {
+        throw new IllegalStateException("This configuration registrant has already been initialized");
+      }
     }
 
     //? Now, perform assignments.
@@ -113,7 +111,9 @@ public class ConfigurationRegistrant {
         .setDraft(Draft.DRAFT7)
     );
     instance.console = ConsoleLogger.getInstance(vertx);
-    instances.put(vertx, instance);
+    synchronized (instances) {
+      instances.put(vertx, instance);
+    }
   }
 
   public static void setUp(Vertx vertx) {
@@ -121,11 +121,12 @@ public class ConfigurationRegistrant {
   }
 
   public static ConfigurationRegistrant getInstance(Vertx vertx) {
-    if (!instances.containsKey(vertx)) {
-      throw new IllegalStateException("This configuration registrant has not been initialized");
+    synchronized (instances) {
+      if (!instances.containsKey(vertx)) {
+        throw new IllegalStateException("This configuration registrant has not been initialized");
+      }
+      return instances.get(vertx);
     }
-
-    return instances.get(vertx);
   }
 
   public static ConfigurationRegistrant getInstance() {

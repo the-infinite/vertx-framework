@@ -316,18 +316,15 @@ public class AppEnvironment {
   public String get(String key, @Nullable String defaultValue) {
     String value = defaultValue;
 
-    //? Let us then do this...
     if (this.configMap.containsKey(key)) {
       value = this.configMap.get(key);
     }
 
-    //? Try to get this from environment variables as well.
     if (System.getenv().containsKey(key)) {
       value = System.getenv(key);
     }
 
-    //? If this was not found...
-    if (value == null) {
+    if (value == null && !this.missingKeys.contains(key)) {
       this.missingKeys.add(key);
     }
 

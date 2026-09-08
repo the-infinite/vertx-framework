@@ -279,16 +279,53 @@ public final class RedisStorage {
     return mapEmpty(api.rename(oldKey, newKey));
   }
 
+  /**
+   * Non-blocking incremental scan - preferred over KEYS which blocks Redis.
+   * Iterates with COUNT hint (250) to avoid materialising the whole keyspace at once.
+   */
+  public Future<List<String>> scanKeys(String pattern) {
+    return scanKeys(pattern, 250);
+  }
+
+  public Future<List<String>> scanKeys(String pattern, int count) {
+    final var all = new ArrayList<String>();
+    return scanBatch("0", pattern, count, all).map(v -> all);
+  }
+
+  private Future<Void> scanBatch(String cursor, String pattern, int count, ArrayList<String> accumulator) {
+    final var args = new ArrayList<String>();
+    args.add(cursor);
+    args.add("MATCH");
+    args.add(pattern);
+    args.add("COUNT");
+    args.add(String.valueOf(count));
+    return mapResponse(api.scan(args), response -> {
+      if (response == null || !response.isArray() || response.size() < 2) {
+        return new ScanResult("0", List.of());
+      }
+      final var nextCursor = response.get(0).toString();
+      final var keysPart = response.get(1);
+      final var keys = new ArrayList<String>();
+      if (keysPart != null && keysPart.isArray()) {
+        for (var r : keysPart) {
+          if (r != null) keys.add(r.toString());
+        }
+      }
+      return new ScanResult(nextCursor, keys);
+    }, new ScanResult("0", List.of())).compose(result -> {
+      accumulator.addAll(result.keys());
+      if ("0".equals(result.cursor())) {
+        return Future.succeededFuture();
+      }
+      return scanBatch(result.cursor(), pattern, count, accumulator);
+    });
+  }
+
+  private record ScanResult(String cursor, List<String> keys) {}
+
+  /** @deprecated Use {@link #scanKeys(String)} to avoid blocking Redis. */
+  @Deprecated
   public Future<List<String>> findKeys(String pattern) {
-    return mapResponse(api.keys(pattern), response -> {
-      final var items = new ArrayList<String>();
-      if (response.isArray()) {
-        items.addAll(response.stream().map(Response::toString).toList());
-      }
-      if (response.isMap()) {
-        items.addAll(response.getKeys());
-      }
-      return items;
-    }, new ArrayList<>());
+    return scanKeys(pattern);
   }
 }

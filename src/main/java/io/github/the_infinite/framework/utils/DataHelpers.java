@@ -503,9 +503,9 @@ public final class DataHelpers {
     @Nullable String packageName
   ) {
     if (packageName == null || packageName.isBlank()) {
-
-      //? ClassGraph uses a try-with-resources block because it opens files
-      try (ScanResult scanResult = new ClassGraph().enableClassInfo().scan()) {
+      // Restrict to application packages to avoid scanning entire classpath (reduces heap spike 10-50MB)
+      // Caller should prefer findSubclasses(base, "com.getmoovable") or "io.github.the_infinite"
+      try (ScanResult scanResult = new ClassGraph().enableClassInfo().acceptPackages("com.getmoovable", "io.github.the_infinite").scan()) {
         return scanResult.getSubclasses(baseClass.getName())
           .loadClasses(baseClass).stream()
           .map(cls -> (Class<? extends T>) cls)

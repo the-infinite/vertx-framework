@@ -32,7 +32,7 @@ import io.vertx.core.json.JsonObject;
  */
 @SuppressWarnings("unused")
 public final class JobRegistry {
-  private final static Map<Vertx, JobRegistry> instances = new ConcurrentHashMap<>();
+  private final static Map<Vertx, JobRegistry> instances = Collections.synchronizedMap(new WeakHashMap<>());
   private final Map<String, ServiceJob<?>> jobs = new ConcurrentHashMap<>();
   private final Map<String, TimeEvent> times = new ConcurrentHashMap<>();
   private final Map<String, AtomicBoolean> running = new ConcurrentHashMap<>();
@@ -61,7 +61,13 @@ public final class JobRegistry {
    * Returns the singleton registry associated with the provided Vert.x instance.
    */
   public static JobRegistry getInstance(Vertx vertx) {
-    return instances.computeIfAbsent(vertx, JobRegistry::new);
+    synchronized (instances) {
+      var existing = instances.get(vertx);
+      if (existing != null) return existing;
+      var created = new JobRegistry(vertx);
+      instances.put(vertx, created);
+      return created;
+    }
   }
 
   private String getRunId(ServiceJob<?> job) {
@@ -272,7 +278,8 @@ public final class JobRegistry {
       }
 
       final var calendar = Calendar.getInstance();
-      timers.add(vertx.setPeriodic(1000, timer -> {
+      // Check once per minute, not every second, to reduce wake-ups and heap churn
+      timers.add(vertx.setPeriodic(60_000, timer -> {
         final var now = new Date();
         for (final var job : timedJobs) {
           final var schedule = job.getSchedule();

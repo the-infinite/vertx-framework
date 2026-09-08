@@ -10,8 +10,10 @@ import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
 import org.jetbrains.annotations.NotNull;
 
 import java.net.URI;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 import io.github.the_infinite.framework.data.cache.CachingStrategy;
@@ -37,11 +39,11 @@ import io.vertx.redis.client.impl.RedisClient;
 @SuppressWarnings("unused")
 public final class DatabaseFactory {
   private static final PostgresOptions defaultOptions = new PostgresOptions();
-  private static final Map<Vertx, RabbitMQClient> queueClients = new ConcurrentHashMap<>();
+  private static final Map<Vertx, RabbitMQClient> queueClients = Collections.synchronizedMap(new WeakHashMap<>());
   private static final Map<String, SessionFactory> sessionFactories = new ConcurrentHashMap<>();
-  private static final Map<Vertx, RestHighLevelClient> elasticClients = new ConcurrentHashMap<>();
-  private static final Map<Vertx, RedisClient> redisClients = new ConcurrentHashMap<>();
-  private static final Map<Vertx, MongoClient> mongoClients = new ConcurrentHashMap<>();
+  private static final Map<Vertx, RestHighLevelClient> elasticClients = Collections.synchronizedMap(new WeakHashMap<>());
+  private static final Map<Vertx, RedisClient> redisClients = Collections.synchronizedMap(new WeakHashMap<>());
+  private static final Map<Vertx, MongoClient> mongoClients = Collections.synchronizedMap(new WeakHashMap<>());
   private static final int DEFAULT_ES_PORT = 9200;
 
   //* Connection bootstrap retry policy. Core infrastructure (databases, brokers, caches) must come up;
@@ -55,9 +57,9 @@ public final class DatabaseFactory {
   }
 
   public static RedisClient getRedisClient(Vertx vertx) {
-    //? If there is already a redis client for this one...
-    if (redisClients.containsKey(vertx)) {
-      return redisClients.get(vertx);
+    synchronized (redisClients) {
+      var existing = redisClients.get(vertx);
+      if (existing != null) return existing;
     }
 
     //? Create a new redis client.
@@ -69,39 +71,44 @@ public final class DatabaseFactory {
     connectWithRetry(vertx, "Redis", () -> client.connect().mapEmpty());
 
     console.exec("Connected to Redis Successfully\n");
-    redisClients.put(vertx, client);
+    synchronized (redisClients) {
+      // Dedupe race: another thread may have inserted while we were connecting
+      var raced = redisClients.get(vertx);
+      if (raced != null) {
+        try { client.close(); } catch (Throwable ignored) {}
+        return raced;
+      }
+      redisClients.put(vertx, client);
+    }
     return client;
   }
 
   public static MongoClient getMongoClient(Vertx vertx) {
-    //? If there is already a mongo client for this one...
-    if (mongoClients.containsKey(vertx)) {
-      return mongoClients.get(vertx);
+    synchronized (mongoClients) {
+      var existing = mongoClients.get(vertx);
+      if (existing != null) return existing;
     }
-
-    //? Create a new mongo client.
     final var env = AppEnvironment.getInstance();
     final var console = ConsoleLogger.getInstance(vertx);
     final var config = new JsonObject()
       .put("connection_string", env.getMongoDbUrl())
       .put("useObjectId", true);
     final var client = MongoClient.createShared(vertx, config);
-
-    //? Fetch collections to validate connectivity with retry + exponential back-off + jitter.
     connectWithRetry(vertx, "MongoDB", () -> client.getCollections().mapEmpty());
-
     console.exec("Connected to MongoDB Successfully\n");
-    mongoClients.put(vertx, client);
+    synchronized (mongoClients) {
+      var raced = mongoClients.get(vertx);
+      if (raced != null) return raced;
+      mongoClients.put(vertx, client);
+    }
     return client;
   }
 
   public static RabbitMQClient getQueueClient(Vertx vertx) {
-    //? If there is already a queue client for this one...
-    if (queueClients.containsKey(vertx)) {
-      return queueClients.get(vertx);
+    synchronized (queueClients) {
+      var existing = queueClients.get(vertx);
+      if (existing != null) return existing;
     }
-
-    //? Create a new queue client.
     final var env = AppEnvironment.getInstance();
     final var console = ConsoleLogger.getInstance(vertx);
     final var config = new RabbitMQOptions()
@@ -111,16 +118,17 @@ public final class DatabaseFactory {
     config.setUri(env.getRabbitMqUrl());
     config.setVirtualHost(env.getRabbitMqVhost());
     final var client = RabbitMQClient.create(vertx, config);
-
-    //? Connect to RabbitMQ with retry + exponential back-off + jitter. Die if we never connect.
     connectWithRetry(vertx, "RabbitMQ", () -> client.start().compose(v ->
       client.isConnected()
         ? Future.succeededFuture()
         : Future.failedFuture(new IllegalStateException("RabbitMQ client reported not connected after start()"))
     ));
-
     console.exec("Connected to RabbitMQ Successfully\n");
-    queueClients.put(vertx, client);
+    synchronized (queueClients) {
+      var raced = queueClients.get(vertx);
+      if (raced != null) return raced;
+      queueClients.put(vertx, client);
+    }
     return client;
   }
 
@@ -146,26 +154,24 @@ public final class DatabaseFactory {
   }
 
   public static RestHighLevelClient getElasticClient(Vertx vertx) {
-    //? If there is already an elastic client for this one...
-    if (elasticClients.containsKey(vertx)) {
-      return elasticClients.get(vertx);
+    synchronized (elasticClients) {
+      var existing = elasticClients.get(vertx);
+      if (existing != null) return existing;
     }
-
-    //? Create a new elastic client.
     final var env = AppEnvironment.getInstance();
     final var console = ConsoleLogger.getInstance(vertx);
     final var parsed = parseEsUrl(env.getEsUrl());
-
     final var client = RestHighLevelClient.create(
       vertx,
       RestClient.builder(new HttpHost(parsed.host(), parsed.port(), parsed.scheme()))
     );
-
-    //? Fetch indices to validate connectivity with retry + exponential back-off + jitter.
     connectWithRetry(vertx, "Elasticsearch", () -> probeElastic(client));
-
     console.exec("Connected to Elasticsearch Successfully\n");
-    elasticClients.put(vertx, client);
+    synchronized (elasticClients) {
+      var raced = elasticClients.get(vertx);
+      if (raced != null) return raced;
+      elasticClients.put(vertx, client);
+    }
     return client;
   }
 
