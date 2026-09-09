@@ -16,6 +16,7 @@ import java.util.function.Function;
 import io.github.the_infinite.framework.data.types.ChangeResultModel;
 import io.github.the_infinite.framework.data.types.PaginatedResult;
 import io.github.the_infinite.framework.data.types.RepositoryOptions;
+import io.github.the_infinite.framework.data.types.Traverser;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
@@ -41,7 +42,17 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
 
   private void prepareDetached(Session session, RepositoryOptions<TModel> options, TModel entity) {
     Hibernate.initialize(entity);
-    this.initializeLazyState(entity);
+    // Targeted initialization: caller-provided traverser explicitly opens only the needed edges.
+    // This replaces the legacy auto-recursive walk that broke on Business ↔ MoovableUser cycles
+    // and eagerly loaded unrelated collections (OOM even with few users).
+    if (options != null && options.getTraverser() != null) {
+      try {
+        Traverser traverser = new Traverser();
+        options.getTraverser().traverse(entity, traverser);
+      } catch (Exception e) {
+        log.warn("Traverser failed for {}: {}", entity.getClass().getSimpleName(), e.getMessage(), e);
+      }
+    }
     final var detach = options != null && options.isDetach();
     if (!session.getTransaction().isActive() || detach) {
       session.detach(entity);
@@ -49,27 +60,24 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
   }
 
   /**
-   * Force-loads any lazy (DELAYED) persistent attribute of the entity while still inside the
-   * worker-thread session boundary. This guarantees that downstream code and JSON serialization
-   * never trigger a blocking JDBC query on the Vert.x event loop, which previously froze the app.
-   * <p>
-   * In a stateful (attached) session the entity <em>could</em> still lazy-load after it is
-   * returned, but that would happen on the Vert.x event loop (blocking), or after the session
-   * is closed / the entity is detached (LazyInitializationException). Eagerly initializing
-   * here makes the read path safe for detaching and for JSON serialization.
-   * <p>
-   * This is intentionally best-effort: if the metamodel cannot be resolved (e.g., the entity
-   * is a {@code HibernateProxy} subclass such as {@code MoovableUser$HibernateProxy}) or an
-   * individual attribute fails to initialize, the exception is swallowed and the entity is still
-   * returned. Callers that require a specific lazy graph should use a fetch join / entity graph.
+   * Legacy auto-recursive initializer kept for reference/rollback. Do not use for new code;
+   * prefer {@link io.github.the_infinite.framework.data.types.EntityTraverser} via
+   * {@link io.github.the_infinite.framework.data.types.RepositoryOptions#withTraverser}.
+   * Fixes the reported breakage on {@code Business} / {@code MoovableUser} unwrapping where
+   * the reflective walk hit cycles and initialized far more than the caller needed.
+   *
+   * @deprecated Use targeted traverser instead.
    */
+  @Deprecated
+  @SuppressWarnings("unused")
   private void initializeLazyState(TModel entity) {
     initializeLazyState(entity, modelType, Collections.newSetFromMap(new IdentityHashMap<>()), 0);
   }
 
+  @Deprecated
   private void initializeLazyState(Object entity, Class<?> declaredType, Set<Object> visited, int depth) {
     if (entity == null || depth > 2 || !visited.add(entity))
-      return; // depth cap + cycle guard
+      return;
     try {
       Class<?> effectiveClass = Hibernate.getClass(entity);
       if (effectiveClass == null || effectiveClass == Object.class)
@@ -80,7 +88,7 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
       try {
         persister = metamodel.getEntityDescriptor(effectiveClass);
       } catch (UnknownEntityTypeException ex) {
-        return; // not an entity type (embeddable/basic) — nothing to recurse into
+        return;
       }
 
       final Object target = Hibernate.unproxy(entity);
@@ -90,7 +98,6 @@ public final class StatefulRepositoryActor<TModel extends BaseEntity> extends Re
           if (attribute.getMappedFetchOptions().getTiming() == FetchTiming.DELAYED && value != null) {
             Hibernate.initialize(value);
           }
-          // Recurse into to-one associations even if eager — they may carry their own lazy fields.
           if (value != null && attribute instanceof ToOneAttributeMapping) {
             initializeLazyState(value, value.getClass(), visited, depth + 1);
           }

@@ -13,6 +13,7 @@ public final class RepositoryOptions<T> {
   private boolean detach;
   private CorrelationContext correlation;
   private Position position;
+  private EntityTraverser<T> traverser;
 
   public RepositoryOptions(Object user, CorrelationContext context, boolean detach) {
     this.user = user;
@@ -77,5 +78,14 @@ public final class RepositoryOptions<T> {
   public RepositoryOptions<T> setPosition(Position position) {
     this.position = position;
     return this;
+  }
+
+  public RepositoryOptions<T> withTraverser(EntityTraverser<T> traverser) {
+    this.traverser = traverser;
+    return this;
+  }
+
+  public RepositoryOptions<T> setTraverser(EntityTraverser<T> traverser) {
+    return withTraverser(traverser);
   }
 }
