@@ -15,6 +15,7 @@ import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
 import io.github.the_infinite.framework.utils.DataHelpers;
 import io.github.the_infinite.framework.validation.ValidationException;
+import io.vertx.core.VertxException;
 import io.vertx.ext.web.validation.BodyProcessorException;
 import io.vertx.ext.web.validation.ParameterProcessorException;
 import io.vertx.ext.web.validation.RequestPredicateException;
@@ -99,6 +100,34 @@ public class ErrorResult extends Exception implements DocumentableDTO {
         Objects.requireNonNullElse(e.getCause(), t).getMessage(),
         400
       );
+      case VertxException e -> {
+        final var cause = e.getCause();
+        if (cause instanceof RuntimeException rx) {
+          yield new ErrorResult(
+            env.isProduction()
+              ? "An unexpected error occurred. Please try again later."
+              : e.getMessage(),
+            env.isProduction() ?
+              "An unexpected error occurred." : t,
+            500
+          );
+        }
+        yield of(cause);
+      }
+      case RuntimeException e -> {
+        final var cause = e.getCause();
+        if (cause instanceof RuntimeException rx) {
+          yield new ErrorResult(
+            env.isProduction()
+              ? "An unexpected error occurred. Please try again later."
+              : e.getMessage(),
+            env.isProduction() ?
+              "An unexpected error occurred." : t,
+            500
+          );
+        }
+        yield of(cause);
+      }
       default -> new ErrorResult(
         env.isProduction()
           ? "An unexpected error occurred. Please try again later."

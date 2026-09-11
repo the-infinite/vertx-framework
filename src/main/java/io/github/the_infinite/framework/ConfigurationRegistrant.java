@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Function;
 
 import io.github.the_infinite.framework.doc.DocumentationController;
 import io.github.the_infinite.framework.env.AppEnvironment;
@@ -48,6 +49,7 @@ public class ConfigurationRegistrant {
   private final Set<Class<? extends RouteController>> controllers = ConcurrentHashMap.newKeySet();
   @Getter
   private SchemaRepository schemaRepository;
+  private Function<Throwable, Future<Void>> errorHandler;
   private ConsoleLogger console;
   private boolean loggedServer = false;
   private boolean loggedWorker = false;
@@ -178,6 +180,10 @@ public class ConfigurationRegistrant {
     return getHostInfo(env.getServerPort());
   }
 
+  public void mountErrorHandler(Function<Throwable, Future<Void>> errorHandler) {
+    this.errorHandler = errorHandler;
+  }
+
   private String[] getSocketHostInfo(AppEnvironment env) {
     return getHostInfo(env.getSocketPort());
   }
@@ -189,6 +195,14 @@ public class ConfigurationRegistrant {
     } catch (UnknownHostException e) {
       return new String[]{"http://localhost:%d".formatted(port), "http://127.0.0.1:%d".formatted(port)};
     }
+  }
+
+  Future<Void> handleError(Throwable error) {
+    if (errorHandler != null) {
+      return errorHandler.apply(error);
+    }
+
+    return Future.failedFuture(error);
   }
 
   public void mountController(RouteController controller) {
@@ -279,6 +293,9 @@ public class ConfigurationRegistrant {
 
       //? Complete the promise with this result.
       promise.succeed(httpServer);
+    }).onFailure(error -> {
+      handleError(error).andThen(_ -> promise.fail(error));
+      timer.stop();
     });
 
     //? Return this for the future.
@@ -353,6 +370,9 @@ public class ConfigurationRegistrant {
 
       //? Complete the promise with this result.
       promise.succeed(netServer);
+    }).onFailure(error -> {
+      handleError(error).andThen(_ -> promise.fail(error));
+      timer.stop();
     });
 
     //? Complete this
@@ -392,6 +412,8 @@ public class ConfigurationRegistrant {
       }
 
       promise.succeed(jobRegistry);
+    }).onFailure(error -> {
+      handleError(error).andThen(_ -> promise.fail(error));
     });
 
     return promise.future();
@@ -437,6 +459,8 @@ public class ConfigurationRegistrant {
       }
 
       promise.succeed(consumer);
+    }).onFailure(error -> {
+      handleError(error).andThen(_ -> promise.fail(error));
     });
 
     return promise.future();

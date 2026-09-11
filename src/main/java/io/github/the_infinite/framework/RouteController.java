@@ -28,7 +28,7 @@ import io.vertx.ext.web.validation.builder.ValidationHandlerBuilder;
 import io.vertx.json.schema.SchemaRepository;
 import io.vertx.json.schema.common.dsl.Schemas;
 
-@SuppressWarnings({"unused", "CallToPrintStackTrace"})
+@SuppressWarnings({"unused"})
 public abstract class RouteController {
   private static final Logger logger = LoggerFactory.getLogger(RouteController.class);
   static int totalCount = 0;
@@ -95,9 +95,8 @@ public abstract class RouteController {
       } catch (Exception e) {
         final var errorResult = ErrorResult.of(e);
         ConsoleLogger.getInstance().error(errorResult.getMessage());
-        if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
-          errorResult.printStackTrace();
-        }
+        final var registrant = ConfigurationRegistrant.getInstance();
+        registrant.handleError(e);
         endAs(errorResult.toServiceResult(), correlationContext);
       }
     };
@@ -122,13 +121,8 @@ public abstract class RouteController {
     } catch (Exception e) {
       final var errorResult = ErrorResult.of(e);
       ConsoleLogger.getInstance().error(errorResult.getMessage());
-      if (AppEnvironment.getInstance().getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
-        if (e.getCause() != null) {
-          e.getCause().printStackTrace();
-        } else {
-          e.printStackTrace();
-        }
-      }
+      final var registrant = ConfigurationRegistrant.getInstance();
+      registrant.handleError(e);
       return errorResult.getMessage();
     }
   }
@@ -194,7 +188,7 @@ public abstract class RouteController {
     response.end(resultBody);
   }
 
-  static private <T> Handler<RoutingContext> wrapHandler(RouteHandler<T> handler) {
+  private <T> Handler<RoutingContext> wrapHandler(RouteHandler<T> handler) {
     return routingContext -> {
       propContext(routingContext);
       final var env = AppEnvironment.getInstance();
@@ -217,11 +211,10 @@ public abstract class RouteController {
           } catch (Exception e) {
             try {
               endAs(ErrorResult.of(e).toServiceResult(), correlationContext);
-            } catch (Exception ignored) {
+              registrant.handleError(e);
+            } catch (Exception exception) {
               ConsoleLogger.getInstance().error("Failed to send error response: " + e.getMessage());
-              if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
-                e.printStackTrace();
-              }
+              registrant.handleError(exception);
             }
           }
         });
@@ -239,11 +232,10 @@ public abstract class RouteController {
 
         try {
           endAs(errorResult.toServiceResult(), correlationContext);
-        } catch (Exception ignored) {
+          registrant.handleError(e);
+        } catch (Exception exception) {
           ConsoleLogger.getInstance().error(errorResult.getMessage());
-          if (env.getKind() != AppEnvironment.EnvironmentKind.PRODUCTION) {
-            errorResult.printStackTrace();
-          }
+          registrant.handleError(exception);
         }
       }
     };
