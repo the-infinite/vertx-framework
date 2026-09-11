@@ -102,7 +102,7 @@ public class ErrorResult extends Exception implements DocumentableDTO {
       );
       case VertxException e -> {
         final var cause = e.getCause();
-        if (cause instanceof RuntimeException rx) {
+        if (cause == null || cause instanceof RuntimeException rx) {
           yield new ErrorResult(
             env.isProduction()
               ? "An unexpected error occurred. Please try again later."
@@ -112,11 +112,11 @@ public class ErrorResult extends Exception implements DocumentableDTO {
             500
           );
         }
-        yield of(Objects.requireNonNullElse(cause, t));
+        yield of(cause);
       }
       case RuntimeException e -> {
         final var cause = e.getCause();
-        if (cause instanceof RuntimeException rx) {
+        if (cause == null || cause instanceof RuntimeException rx) {
           yield new ErrorResult(
             env.isProduction()
               ? "An unexpected error occurred. Please try again later."
@@ -126,7 +126,7 @@ public class ErrorResult extends Exception implements DocumentableDTO {
             500
           );
         }
-        yield of(Objects.requireNonNullElse(cause, t));
+        yield of(cause);
       }
       default -> new ErrorResult(
         env.isProduction()
