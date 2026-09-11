@@ -112,7 +112,7 @@ public class ErrorResult extends Exception implements DocumentableDTO {
             500
           );
         }
-        yield of(cause);
+        yield of(Objects.requireNonNullElse(cause, t));
       }
       case RuntimeException e -> {
         final var cause = e.getCause();
@@ -126,7 +126,7 @@ public class ErrorResult extends Exception implements DocumentableDTO {
             500
           );
         }
-        yield of(cause);
+        yield of(Objects.requireNonNullElse(cause, t));
       }
       default -> new ErrorResult(
         env.isProduction()
