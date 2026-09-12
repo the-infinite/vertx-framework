@@ -70,8 +70,10 @@ public final class GenericStartup {
 
     //? Let us initialize the service configuration itself.
     try {
-      GatewayConnect.setUp(staticVertx, mountPaths, options.serviceProtocol(),
-        options.serviceWeight(), options.authType()).await();
+      GatewayConnect.setUp(
+        staticVertx, mountPaths, options.serviceProtocol(),
+        options.serviceWeight(), options.authType()
+      ).await();
       globalConsole.info("Successfully registered service configuration.");
     } catch (Exception e) {
       globalConsole.error("Failed to register service configuration: %s".formatted(e.getMessage()));
@@ -101,7 +103,7 @@ public final class GenericStartup {
       }
 
       //* You do this ONLY after all the HTTP controllers have been properly mounted.
-      final var building =  globalConsole.time("Build OpenAPI documentation");
+      final var building = globalConsole.time("Build OpenAPI documentation");
       DocumentationController.buildSpecs(); // Build this ONCE and only here.
       building.end();
 
