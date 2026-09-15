@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 import io.github.the_infinite.framework.data.cache.CachingStrategy;
 import io.github.the_infinite.framework.data.cache.InMemoryRegionFactory;
@@ -206,7 +207,7 @@ public final class DatabaseFactory {
     final var databaseConnectTimer = console.time("Connecting to the PG database for '%s'".formatted(options.unitName));
 
     //? Then we log this.
-    final var connectAction = (java.util.function.Supplier<Future<SessionFactory>>) () -> vertx.executeBlocking(() -> {
+    final var connectAction = (Supplier<Future<SessionFactory>>) () -> vertx.executeBlocking(() -> {
       //? First, build the basics.
       final var props = new HashMap<String, Object>();
       props.put("jakarta.persistence.jdbc.url", toJDBCUrl(options.url));

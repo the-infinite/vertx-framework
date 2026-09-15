@@ -12,10 +12,12 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import io.github.the_infinite.framework.ConfigurationRegistrant;
 import io.github.the_infinite.framework.data.types.ChangeResultModel;
 import io.github.the_infinite.framework.data.types.PaginatedResult;
 import io.github.the_infinite.framework.data.types.RepositoryOptions;
@@ -23,12 +25,19 @@ import io.github.the_infinite.framework.utils.DataHelpers;
 import io.vertx.core.Context;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
-import io.vertx.core.Vertx;
 import jakarta.persistence.LockModeType;
 
 @SuppressWarnings("unused")
 public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession> permits StatefulRepositoryActor, StatelessRepositoryActor {
   private static final Logger logger = LoggerFactory.getLogger(RepositoryActor.class);
+  private static final AtomicLong threads = new AtomicLong();
+  private static final ExecutorService executorService = Executors.newThreadPerTaskExecutor(r -> {
+    final var factory = Thread.ofVirtual().factory();
+    final var thread = factory.newThread(r);
+    thread.setName("db-worker-%d".formatted(threads.incrementAndGet()));
+    thread.setDaemon(true);
+    return thread;
+  });
   protected final SessionFactory sessionFactory;
   protected final Class<TModel> modelType;
 
@@ -41,7 +50,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
    * Internally used to run blocking Hibernate work in Vert.x while keeping the repository API Future-based.
    */
   static <T> Future<T> wrap(Supplier<T> supplier) {
-    return wrap(supplier, Vertx.currentContext());
+    return wrap(supplier, null);
   }
 
   static <T> Future<T> wrap(Supplier<T> supplier, @Nullable Context context) {
@@ -61,11 +70,7 @@ public sealed abstract class RepositoryActor<TModel extends BaseEntity, TSession
       }
     };
 
-    final var usedContext = context == null ? ConfigurationRegistrant.vertx().getOrCreateContext() : context;
-    usedContext.owner().executeBlocking(() -> {
-      execute.run();
-      return null;
-    });
+    executorService.execute(execute);
     return promise.future();
   }
 
