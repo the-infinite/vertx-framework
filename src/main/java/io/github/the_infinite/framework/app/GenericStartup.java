@@ -17,9 +17,7 @@ import io.github.the_infinite.framework.doc.DocumentationRegistrant;
 import io.github.the_infinite.framework.env.AppEnvironment;
 import io.github.the_infinite.framework.gateway.GatewayConnect;
 import io.github.the_infinite.framework.logging.console.ConsoleLogger;
-import io.vertx.core.DeploymentOptions;
-import io.vertx.core.Vertx;
-import io.vertx.core.VertxOptions;
+import io.vertx.core.*;
 
 @SuppressWarnings({"CallToPrintStackTrace", "unused"})
 public final class GenericStartup {
@@ -108,7 +106,15 @@ public final class GenericStartup {
       building.end();
 
       //? Finally, deploy this verticle.
-      serverVertx.deployVerticle(ServerVerticle::new, new DeploymentOptions().setHa(true).setWorkerPoolName("Server-Pool").setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getServerCount())).setInstances(env.getServerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy server: %s".formatted(throwable.getMessage())));
+      serverVertx.deployVerticle(
+        ServerVerticle::new,
+        new DeploymentOptions()
+          .setHa(true)
+          .setWorkerPoolName("Server-Pool")
+          .setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getServerCount()))
+          .setThreadingModel(ThreadingModel.VIRTUAL_THREAD)
+          .setInstances(env.getServerCount())
+      ).onFailure(throwable -> globalConsole.error("Failed to deploy server: %s".formatted(throwable.getMessage())));
     }
 
     //? If this is a worker...
@@ -117,7 +123,15 @@ public final class GenericStartup {
       final var workerVertx = createVertxInstance(false, options);
 
       //? Then we add the controllers here.
-      workerVertx.deployVerticle(WorkerVerticle::new, new DeploymentOptions().setHa(true).setWorkerPoolName("Worker-Pool").setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getWorkerCount())).setInstances(env.getWorkerCount())).onFailure(throwable -> globalConsole.error("Failed to deploy worker: %s".formatted(throwable.getMessage())));
+      workerVertx.deployVerticle(
+        WorkerVerticle::new,
+        new DeploymentOptions()
+          .setHa(true)
+          .setWorkerPoolName("Worker-Pool")
+          .setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getWorkerCount()))
+          .setThreadingModel(ThreadingModel.VIRTUAL_THREAD)
+          .setInstances(env.getWorkerCount())
+      ).onFailure(throwable -> globalConsole.error("Failed to deploy worker: %s".formatted(throwable.getMessage())));
     }
 
     //? If there are any consumers, we deploy them here.
@@ -132,7 +146,9 @@ public final class GenericStartup {
       for (final var consumer : consumerRegistrar.consume(consumerVertx)) {
         consumerVertx.deployVerticle(
           () -> new ConsumerVerticle<>(consumer),
-          new DeploymentOptions().setHa(true)
+          new DeploymentOptions()
+            .setHa(true)
+            .setThreadingModel(ThreadingModel.VIRTUAL_THREAD)
             .setWorkerPoolName("Consumer-Pool")
         ).onFailure(throwable -> globalConsole.error("Failed to deploy consumer: %s".formatted(throwable.getMessage())));
       }
@@ -145,9 +161,11 @@ public final class GenericStartup {
       //? Finally, deploy this verticle.
       socketVertx.deployVerticle(
         SocketVerticle::new,
-        new DeploymentOptions().setHa(true).setWorkerPoolName("Socket-Pool")
-          .setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getWorkerCount())
-          ).setInstances(env.getWorkerCount())
+        new DeploymentOptions().setHa(true)
+          .setWorkerPoolName("Socket-Pool")
+          .setWorkerPoolSize(Math.ceilDiv(cpuCount, env.getWorkerCount()))
+          .setThreadingModel(ThreadingModel.VIRTUAL_THREAD)
+          .setInstances(env.getWorkerCount())
       ).onFailure(throwable -> globalConsole.error("Failed to deploy socket server: %s".formatted(throwable.getMessage())));
     }
   }
